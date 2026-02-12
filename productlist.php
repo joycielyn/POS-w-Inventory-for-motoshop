@@ -29,7 +29,6 @@ if(isset($_POST['btnsave'])){
     $store = "productimage/".$f_newfile;
 
     if(in_array($f_extension, ['jpg','jpeg','png','gif'])){
-
         if($f_size >= 1000000){
             $_SESSION['status'] = "Max file should be 1MB";
             $_SESSION['status_code'] = "error";
@@ -88,6 +87,79 @@ if(isset($_POST['btnsave'])){
         $_SESSION['status_code'] = "error";
     }
 }
+
+// ================= EDIT PRODUCT LOGIC =================
+if(isset($_POST['btneditproduct'])){
+    $id = $_POST['edit_pid'];
+    $product_txt = $_POST['txtproductname'];
+    $category_txt = $_POST['txtselect_option'];
+    $description_txt = $_POST['txtdescription'];
+    $stock_txt = $_POST['txtstock'];
+    $purchaseprice_txt = $_POST['txtpurchaseprice'];
+    $saleprice_txt = $_POST['txtsaleprice'];
+    $product_unit_txt = $_POST['txtproduct_unit'];
+    
+    // Get current image
+    $select_img = $pdo->prepare("SELECT image FROM tbl_product WHERE pid=:pid");
+    $select_img->bindParam(':pid', $id);
+    $select_img->execute();
+    $img_row = $select_img->fetch(PDO::FETCH_ASSOC);
+    $current_image = $img_row['image'];
+
+    $f_name = $_FILES['myfile']['name'];
+    if(!empty($f_name)){
+        $f_tmp = $_FILES['myfile']['tmp_name'];
+        $f_size = $_FILES['myfile']['size'];
+        $f_extension = strtolower(end(explode('.', $f_name)));
+        $f_newfile = uniqid().'.'.$f_extension;
+        $store = "productimage/".$f_newfile;
+
+        if(in_array($f_extension,['jpg','jpeg','png','gif'])){
+            if($f_size >= 1000000){
+                $_SESSION['status']="Max file should be 1MB";
+                $_SESSION['status_code']="error";
+            }else{
+                if(move_uploaded_file($f_tmp,$store)){
+                    $image_to_save = $f_newfile;
+                }
+            }
+        }else{
+            $_SESSION['status']="Only jpg,jpeg,png,gif allowed";
+            $_SESSION['status_code']="error";
+        }
+    }else{
+        $image_to_save = $current_image;
+    }
+
+    $update = $pdo->prepare("UPDATE tbl_product SET 
+        product=:product,
+        product_unit=:unit,
+        category=:category,
+        description=:description,
+        stock=:stock,
+        purchaseprice=:pprice,
+        saleprice=:sprice,
+        image=:image
+        WHERE pid=:pid");
+
+    $update->bindParam(':product', $product_txt);
+    $update->bindParam(':unit', $product_unit_txt);
+    $update->bindParam(':category', $category_txt);
+    $update->bindParam(':description', $description_txt);
+    $update->bindParam(':stock', $stock_txt);
+    $update->bindParam(':pprice', $purchaseprice_txt);
+    $update->bindParam(':sprice', $saleprice_txt);
+    $update->bindParam(':image', $image_to_save);
+    $update->bindParam(':pid', $id);
+
+    if($update->execute()){
+        $_SESSION['status']="Product Updated Successfully";
+        $_SESSION['status_code']="success";
+    }else{
+        $_SESSION['status']="Product Update Failed";
+        $_SESSION['status_code']="error";
+    }
+}
 ?>
 
 <div class="content-wrapper">
@@ -95,7 +167,6 @@ if(isset($_POST['btnsave'])){
         <div class="container-fluid">
             <div class="row">
                 <div class="col-lg-12">
-
                     <div class="card card-primary card-outline">
 
                         <div class="card-header d-flex justify-content-between">
@@ -121,7 +192,6 @@ if(isset($_POST['btnsave'])){
                                         <td>Actions</td>
                                     </tr>
                                 </thead>
-
                                 <tbody>
                                 <?php
                                 $select = $pdo->prepare("SELECT * FROM tbl_product ORDER BY pid ASC");
@@ -149,25 +219,99 @@ if(isset($_POST['btnsave'])){
                                                 <a href="printbarcode.php?id='.$row->pid.'" class="btn btn-dark btn-xs">
                                                     <span class="fa fa-barcode"></span>
                                                 </a>
-                                                <a href="viewproduct.php?id='.$row->pid.'" class="btn btn-warning btn-xs">
-                                                    <span class="fa fa-eye"></span>
-                                                </a>
-                                                <a href="editproduct.php?id='.$row->pid.'" class="btn btn-success btn-xs">
+                                                <a href="#" class="btn btn-success btn-xs" data-toggle="modal" data-target="#editProductModal'.$row->pid.'">
                                                     <span class="fa fa-edit"></span>
                                                 </a>
-                                                <button id='.$row->pid.' class="btn btn-danger btn-xs btndelete">
+                                                <button id="'.$row->pid.'" class="btn btn-danger btn-xs btndelete">
                                                     <span class="fa fa-trash"></span>
                                                 </button>
                                             </div>
                                         </td>
                                     </tr>';
+
+                                    // =============== EDIT PRODUCT MODAL =================
+                                    ?>
+                                    <div class="modal fade" id="editProductModal<?php echo $row->pid;?>" tabindex="-1" role="dialog">
+                                    <div class="modal-dialog modal-lg" role="document">
+                                        <div class="modal-content">
+                                            <form action="" method="post" enctype="multipart/form-data">
+                                                <div class="modal-header bg-success">
+                                                    <h5 class="modal-title">Edit Product</h5>
+                                                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                                                </div>
+                                                <div class="modal-body">
+                                                    <input type="hidden" name="edit_pid" value="<?php echo $row->pid;?>">
+                                                    <div class="row">
+                                                        <div class="col-md-6">
+                                                            <div class="form-group">
+                                                                <label>Product Name</label>
+                                                                <input type="text" class="form-control" name="txtproductname" value="<?php echo $row->product;?>" required>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label>Category</label>
+                                                                <select class="form-control" name="txtselect_option" required>
+                                                                    <option disabled>Select Category</option>
+                                                                    <?php
+                                                                    $cat_select=$pdo->prepare("SELECT * FROM tbl_category ORDER BY catid DESC");
+                                                                    $cat_select->execute();
+                                                                    while($cat_row=$cat_select->fetch(PDO::FETCH_ASSOC)){
+                                                                        $selected = ($cat_row['category']==$row->category)?'selected':'';
+                                                                        echo '<option '.$selected.'>'.$cat_row['category'].'</option>';
+                                                                    }
+                                                                    ?>
+                                                                </select>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label>Description</label>
+                                                                <textarea class="form-control" name="txtdescription" rows="3"><?php echo $row->description;?></textarea>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-6">
+                                                            <div class="form-group">
+                                                                <label>Stock Quantity</label>
+                                                                <input type="number" class="form-control" name="txtstock" value="<?php echo $row->stock;?>" required>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label>Purchase Price</label>
+                                                                <input type="number" class="form-control" name="txtpurchaseprice" value="<?php echo $row->purchaseprice;?>" required>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label>Sale Price</label>
+                                                                <input type="number" class="form-control" name="txtsaleprice" value="<?php echo $row->saleprice;?>" required>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label>Product Unit</label>
+                                                                <select class="form-control" name="txtproduct_unit" required>
+                                                                    <option value="pcs" <?php if($row->product_unit=='pcs') echo 'selected';?>>PCS</option>
+                                                                    <option value="set" <?php if($row->product_unit=='set') echo 'selected';?>>SET</option>
+                                                                    <option value="box" <?php if($row->product_unit=='box') echo 'selected';?>>BOX</option>
+                                                                    <option value="pack" <?php if($row->product_unit=='pack') echo 'selected';?>>PACK</option>
+                                                                    <option value="kg" <?php if($row->product_unit=='kg') echo 'selected';?>>KG</option>
+                                                                </select>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label>Product Image</label><br>
+                                                                <img src="productimage/<?php echo $row->image;?>" width="50px" height="50px">
+                                                                <input type="file" class="form-control" name="myfile">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="modal-footer">
+                                                    <button type="submit" class="btn btn-success" name="btneditproduct">Update Product</button>
+                                                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                    </div>
+                                    <?php
                                 }
                                 ?>
                                 </tbody>
                             </table>
                         </div>
                     </div>
-
                 </div>
             </div>
         </div>
