@@ -3,9 +3,7 @@
 include_once'connectdb.php';
 session_start();
 
-
 if($_SESSION['useremail']==""){
-
 header('location:../index.php');
 }
 
@@ -17,147 +15,187 @@ include_once"header.php";
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AdminLTE 3 | Dashboard 3</title>
+  <title>AdminLTE 3 | Dashboard</title>
 
-  <!-- Google Font: Source Sans Pro -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,400i,700&display=fallback">
-  <!-- Font Awesome Icons -->
   <link rel="stylesheet" href="plugins/fontawesome-free/css/all.min.css">
-  <!-- IonIcons -->
-  <link rel="stylesheet" href="https://code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css">
-  <!-- Theme style -->
   <link rel="stylesheet" href="dist/css/adminlte.min.css">
 </head>
+
 <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <div class="content-header">
-        <div class="container-fluid">
-            <div class="row mb-2">
-                <div class="col-sm-6">
-                    <h1 class="m-0">Dashboard</h1>
-                    <hr>
-                </div>
-                <div class="col-sm-6">
-                    <ol class="breadcrumb float-sm-right">
-                    </ol>
-                </div>
-            </div>
-        </div>
-    </div>
-    <!-- /.content-header -->
-     <!-- Main content -->
-    <section class="content">
-      <div class="container-fluid">
-        <!-- Small boxes (Stat box) -->
-        <div class="row">
-          <div class="col-lg-3 col-6">
-            <!-- small box -->
-            <div class="small-box bg-info">
-              <div class="inner">
-                <h3>Sales</h3>
 
-                <p>Sales</p>
-              </div>
-              <div class="icon">
-                <i class="ion ion-stats-bars"></i>
-              </div>
-              <a href="#" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
-            </div>
-          </div>
-          <!-- ./col -->
-          <div class="col-lg-3 col-6">
-            <!-- small box -->
-            <div class="small-box bg-success">
-              <div class="inner">
-                <h3>Products<sup style="font-size: 20px"></sup></h3>
+<div class="content-header">
+<div class="container-fluid">
+<div class="row mb-2">
+<div class="col-sm-6">
+<h1 class="m-0">Dashboard</h1>
+<hr>
+</div>
+</div>
+</div>
+</div>
 
-                <p>Products</p>
-              </div>
-              <div class="icon">
-                <i class="fas fa-box"></i>
-              </div>
-              <a href="#" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
-            </div>
-          </div>
-          <!-- ./col -->
-          <div class="col-lg-3 col-6">
-            <!-- small box -->
-            <div class="small-box bg-warning">
-              <div class="inner">
-                <h3>Users</h3>
+<section class="content">
+<div class="container-fluid">
 
-                <p>Users</p>
-              </div>
-              <div class="icon">
-                <i class="ion ion-person-add"></i>
-              </div>
-              <a href="#" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
-            </div>
-          </div>
-          <!-- ./col -->
-          <div class="col-lg-3 col-6">
-            <!-- small box -->
-            <div class="small-box bg-danger">
-              <div class="inner">
-                <h3>Revenue</h3>
+<div class="row">
 
-                <p>Revenue</p>
-              </div>
-              <div class="icon">
-                <i class="fas fa-wallet"></i>
-              </div>
-              <a href="#" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
-            </div>
-          </div>
-          <!-- ./col -->
-        </div>
-        <!-- /.row -->
-        <!-- Main row -->
-        <div class="row">
-          <!-- Left col -->
-          <section class="col-lg-7 connectedSortable">
-            <!-- Custom tabs (Charts with tabs)-->
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">
-                  <i class="fas fa-chart-pie mr-1"></i>
-                  Sales Analytics
-                </h3>
-                <div class="card-tools">
-                  <ul class="nav nav-pills ml-auto">
-                   
-                    <li class="nav-item">
-                      <a class="nav-link" href="#sales-chart" data-toggle="tab">Donut</a>
-                    </li>
-                  </ul>
-                </div>
-              </div><!-- /.card-header -->
-              <div class="card-body">
-                <div class="tab-content p-0">
-                  <!-- Morris chart - Sales -->
-                  <div class="chart tab-pane active" id="revenue-chart"
-                       style="position: relative; height: 300px;">
-                      <canvas id="revenue-chart-canvas" height="300" style="height: 300px;"></canvas>
-                   </div>
-                  <div class="chart tab-pane" id="sales-chart" style="position: relative; height: 300px;">
-                    <canvas id="sales-chart-canvas" height="300" style="height: 300px;"></canvas>
-                  </div>
-                </div>
-              </div><!-- /.card-body -->
-            </div>
-            <!-- /.card --> 
-          </section>
-          <!-- /.Left col -->
-          <!-- right col (We are only adding the ID to make the widgets sortable)-->
-          <section class="col-lg-5 connectedSortable">
-          </section>
-        </div>
-      </div>
-    </section>
-   
-  </div>
+<!-- SALES -->
+<div class="col-lg-3 col-6">
+<div class="small-box bg-info">
+<div class="inner">
+<h3>Sales</h3>
+<p>Sales</p>
+</div>
+<div class="icon">
+<i class="ion ion-stats-bars"></i>
+</div>
+
+<a href="#" class="small-box-footer"
+data-toggle="modal"
+data-target="#filterModal"
+data-type="Sales">
+More info <i class="fas fa-arrow-circle-right"></i>
+</a>
+
+</div>
+</div>
+
+<!-- PRODUCTS -->
+<div class="col-lg-3 col-6">
+<div class="small-box bg-success">
+<div class="inner">
+<h3>Products</h3>
+<p>Products</p>
+</div>
+<div class="icon">
+<i class="fas fa-box"></i>
+</div>
+
+<a href="#" class="small-box-footer"
+data-toggle="modal"
+data-target="#filterModal"
+data-type="Products">
+More info <i class="fas fa-arrow-circle-right"></i>
+</a>
+
+</div>
+</div>
+
+<!-- USERS -->
+<div class="col-lg-3 col-6">
+<div class="small-box bg-warning">
+<div class="inner">
+<h3>Users</h3>
+<p>Users</p>
+</div>
+<div class="icon">
+<i class="ion ion-person-add"></i>
+</div>
+
+<a href="#" class="small-box-footer"
+data-toggle="modal"
+data-target="#filterModal"
+data-type="Users">
+More info <i class="fas fa-arrow-circle-right"></i>
+</a>
+
+</div>
+</div>
+
+<!-- REVENUE -->
+<div class="col-lg-3 col-6">
+<div class="small-box bg-danger">
+<div class="inner">
+<h3>Revenue</h3>
+<p>Revenue</p>
+</div>
+<div class="icon">
+<i class="fas fa-wallet"></i>
+</div>
+
+<a href="#" class="small-box-footer"
+data-toggle="modal"
+data-target="#filterModal"
+data-type="Revenue">
+More info <i class="fas fa-arrow-circle-right"></i>
+</a>
+
+</div>
+</div>
+
+</div>
+</div>
+</section>
+
+</div>
+
+<!-- ================= MODAL ================= -->
+<div class="modal fade" id="filterModal">
+<div class="modal-dialog">
+<div class="modal-content">
+
+<form method="POST" action="filter.php">
+
+<div class="modal-header">
+<h5 class="modal-title" id="modalTitle">Filter</h5>
+<button type="button" class="close" data-dismiss="modal">&times;</button>
+</div>
+
+<div class="modal-body">
+
+<input type="hidden" name="type" id="modalType">
+
+<div class="form-group">
+<label>Select Date</label>
+<input type="date" name="date" class="form-control">
+</div>
+
+<div class="form-group">
+<label>Select Week</label>
+<input type="week" name="week" class="form-control">
+</div>
+
+<div class="form-group">
+<label>Select Month</label>
+<input type="month" name="month" class="form-control">
+</div>
+
+<div class="form-group">
+<label>Select Year</label>
+<input type="number" name="year" min="2000" max="2100"
+class="form-control" placeholder="Enter year">
+</div>
+
+</div>
+
+<div class="modal-footer">
+<button type="submit" class="btn btn-primary">Apply Filter</button>
+</div>
+
+</form>
+
+</div>
+</div>
+</div>
+<!-- ================= END MODAL ================= -->
+
+<script src="plugins/jquery/jquery.min.js"></script>
+<script src="plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
+<script src="dist/js/adminlte.js"></script>
+
+<script>
+$('#filterModal').on('show.bs.modal', function (event) {
+
+var button = $(event.relatedTarget);
+var type = button.data('type');
+
+$('#modalTitle').text('Filter ' + type);
+$('#modalType').val(type);
+
+});
+</script>
 
 </body>
-      <?php 
-      include_once"footer.php";
-      ?>
+
+<?php include_once"footer.php"; ?>
