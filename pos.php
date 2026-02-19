@@ -22,13 +22,18 @@ if (isset($_POST['btnsaveorder'])) {
   $orderdate      = date('Y-m-d');
   $subtotal       = $_POST['txtsubtotal'];
   $discount       = $_POST['txtdiscount'];
-  $sgst           = $_POST['txtsgst'];
-  $cgst           = $_POST['txtcgst'];
   $total          = $_POST['txttotal'];
-  $payment_type   = $_POST['rb'];
+  $payment_type   = 'Cash'; // Only Cash payment
   $due            = $_POST['txtdue'];
   $paid           = $_POST['txtpaid'];
   
+  // Validate payment - paid amount must be >= total
+  if(floatval($paid) < floatval($total)){
+    $_SESSION['status'] = "Insufficient payment! Amount paid is less than total.";
+    $_SESSION['status_code'] = "error";
+    header('location:pos.php');
+    exit();
+  }
 
   $arr_pid     = $_POST['pid_arr'];
   $arr_barcode = $_POST['barcode_arr'];
@@ -40,13 +45,11 @@ if (isset($_POST['btnsaveorder'])) {
 
     
 
-  // Insert invoice data into tbl_invoice table
-  $insert = $pdo->prepare("INSERT INTO tbl_invoice(order_date, subtotal, discount, sgst, cgst, total, payment_type, due, paid) VALUES (:order_date, :subtotal, :discount, :sgst, :cgst, :total, :payment_type, :due, :paid)");
+  // Insert invoice data into tbl_invoice table (removed sgst, cgst)
+  $insert = $pdo->prepare("INSERT INTO tbl_invoice(order_date, subtotal, discount, sgst, cgst, total, payment_type, due, paid) VALUES (:order_date, :subtotal, :discount, 0, 0, :total, :payment_type, :due, :paid)");
   $insert->bindParam(':order_date', $orderdate);
   $insert->bindParam(':subtotal', $subtotal);
   $insert->bindParam(':discount', $discount);
-  $insert->bindParam(':sgst', $sgst);
-  $insert->bindParam(':cgst', $cgst);
   $insert->bindParam(':total', $total);
   $insert->bindParam(':payment_type', $payment_type);
   $insert->bindParam(':due', $due);
@@ -203,6 +206,7 @@ ob_end_flush();
                         <thead>
                           <tr>
                             <th>Product </th>
+                            <th>Unit </th>
                             <th>Stock </th>
                             <th>Price </th>
                             <th>QTY </th>
@@ -263,49 +267,6 @@ ob_end_flush();
                   </div>
                 </div> 
 
-
-                    <div class="input-group">
-                      <div class="input-group-prepend">
-                        <span class="input-group-text">SGST(%)</span>
-                      </div>
-                      <input type="text" class="form-control" name="txtsgst" id="txtsgst_id_p" value="<?php echo $row->sgst; ?>" readonly>
-                      <div class="input-group-append">
-                        <span class="input-group-text">%</span>
-                      </div>
-                    </div>
-
-
-                    <div class="input-group">
-                      <div class="input-group-prepend">
-                        <span class="input-group-text">CGST(%)</span>
-                      </div>
-                      <input type="text" class="form-control" name="txtcgst" id="txtcgst_id_p" value="<?php echo $row->cgst; ?>" readonly>
-                      <div class="input-group-append">
-                        <span class="input-group-text">%</span>
-                      </div>
-                    </div>
-
-                    <div class="input-group">
-                      <div class="input-group-prepend">
-                        <span class="input-group-text">SGST(₱)</span>
-                      </div>
-                      <input type="text" class="form-control" id="txtsgst_id_n" readonly>
-                      <div class="input-group-append">
-                        <span class="input-group-text">₱</span>
-                      </div>
-                    </div>
-
-
-                    <div class="input-group">
-                      <div class="input-group-prepend">
-                        <span class="input-group-text">CGST(₱)</span>
-                      </div>
-                      <input type="text" class="form-control" id="txtcgst_id_n" readonly>
-                      <div class="input-group-append">
-                        <span class="input-group-text">₱</span>
-                      </div>
-                    </div>
-
                     <hr style="height: 2px; border-width:0; color:black; background-color:black;">
 
 
@@ -330,19 +291,7 @@ ob_end_flush();
                         CASH
                       </label>
                     </div>
-                    <div class="icheck-primary d-inline">
-                      <input type="radio" name="rb" value="Card" id="radioSuccess2">
-                      <label for="radioSuccess2">
-                        CARD
-                      </label>
-                    </div>
-                    <div class="icheck-danger d-inline">
-                      <input type="radio" name="rb" value="Check" id="radioSuccess3">
-                      <label for="radioSuccess3">
-                        CHECK
-                      </label>
-
-                    </div>
+                    
                     <hr style="height: 2px; border-width:0; color:blue; background-color:blue;">
 
 
@@ -380,7 +329,7 @@ ob_end_flush();
 
                       <div class="text-center">
                         <div class="text-center">
-                          <button type="submit" class="btn btn-success" name="btnsaveorder">Save Order</button>
+                          <button type="submit" class="btn btn-success" name="btnsaveorder" id="btnsaveorder">Save Order</button>
                         </div>
                       </div>
 
@@ -469,19 +418,23 @@ include_once("footer.php");
 
           } else {
 
-            addrow(data["pid"], data["product"], data["saleprice"], data["stock"], data["barcode"]);
+            addrow(data["pid"], data["product"], data["saleprice"], data["stock"], data["barcode"], data["product_unit"]);
 
             productarr.push(data["pid"]);
 
             // $("#txtbarcode_id").val("");
 
-            function addrow(pid, product, saleprice, stock, barcode) {
+            function addrow(pid, product, saleprice, stock, barcode, product_unit) {
+
+              var unit = product_unit ? product_unit : 'pcs';
 
               var tr = '<tr>' +
 
               '<input type="hidden" class="form-control barcode" name="barcode_arr[]" id="barcode_id' + barcode + '" value="' +barcode+ '"></td>' +
 
                 '<td style="text-align:left; vertical-align:middle; font-size:17px;"><class="form-control product_c" name="product_arr[]"  <span class="badge badge-dark">' + product + '</span><input type="hidden" class="form-control pid" name="pid_arr[]" value="' + pid + '"><input type="hidden" class="form-control product" name="product_arr[]" value="' + product + '"> </td>' +
+
+                '<td style="text-align:center;vertical-align:middle; font-size:14px;"><span class="badge badge-secondary">' + unit + '</span></td>' +
 
                 '<td style="text-align:left;vertical-align:middle; font-size:17px;"><span class="badge badge-primary stocklbl" name="stock_arr[]" id="stock_id' + pid + '">' + stock + '<span><input type="hidden" class="form-control stock_C" name="stock_c_arr[]" id="stock_idd' + pid + '" value="' + stock + '"></td>' +
 
@@ -555,19 +508,23 @@ $("#txtbarcode_id").val("");
           } else {
 
 
-            addrow(data["pid"], data["product"], data["saleprice"], data["stock"], data["barcode"]);
+            addrow(data["pid"], data["product"], data["saleprice"], data["stock"], data["barcode"], data["product_unit"]);
 
             productarr.push(data["pid"]);
 
             // $("#txtbarcode_id").val("");
 
-            function addrow(pid, product, saleprice, stock, barcode) {
+            function addrow(pid, product, saleprice, stock, barcode, product_unit) {
+
+              var unit = product_unit ? product_unit : 'pcs';
 
               var tr = '<tr>' +
 
               '<input type="hidden" class="form-control barcode" name="barcode_arr[]" id="barcode_id' + barcode + '" value="' +barcode+ '">' +
 
                 '<td style="text-align:left; vertical-align:middle; font-size:17px;"><class="form-control product_c" name="product_arr[]" <span class="badge badge-dark">' + product + '</span><input type="hidden" class="form-control pid" name="pid_arr[]" value="' + pid + '"><input type="hidden" class="form-control product" name="product_arr[]" value="' + product + '"> </td>' +
+
+                '<td style="text-align:center;vertical-align:middle; font-size:14px;"><span class="badge badge-secondary">' + unit + '</span></td>' +
 
                 '<td style="text-align:left;vertical-align:middle; font-size:17px;"><span class="badge badge-primary stocklbl" name="stock_arr[]" id="stock_id' + pid + '">' + stock + '<span><input type="hidden" class="form-control stock_C" name="stock_c_arr[]" id="stock_idd' + pid + '" value="' + stock + '"></td>' +
 
@@ -645,8 +602,6 @@ $("#txtbarcode_id").val("");
 
     var subtotal = 0;
     var discount = dis;
-    var sgst = 0;
-    var cgst = 0;
     var total = 0;
     var paid_amt = paid;
     var due = 0;
@@ -660,28 +615,14 @@ $("#txtbarcode_id").val("");
 
     $("#txtsubtotal_id").val(subtotal.toFixed(2));
 
-    sgst = parseFloat($("#txtsgst_id_p").val());
-
-    cgst = parseFloat($("#txtcgst_id_p").val());
-
     discount = parseFloat($("#txtdiscount_p").val());
-
-    sgst = sgst / 100;
-    sgst = sgst * subtotal;
-
-    cgst = cgst / 100;
-    cgst = cgst * subtotal;
 
     discount = discount / 100;
     discount = discount * subtotal;
 
-    $("#txtsgst_id_n").val(sgst.toFixed(2));
+    $("#txtdiscount_n").val(discount.toFixed(2));
 
-    $("#txtcgst_id_n").val(cgst.toFixed(2));
-
-    $("#txtdiscount_n").val(discount.toFixed(1));
-
-    total = sgst + cgst + subtotal - discount;
+    total = subtotal - discount;
     due = total - paid_amt;
 
     $("#txttotal").val(total.toFixed(2));
@@ -719,6 +660,49 @@ $("#txtbarcode_id").val("");
     });
 
     $(this).closest('tr').remove();
+    calculate(0, 0);
 
-  })
+  });
+
+  // Validate payment before submitting
+  $('form').on('submit', function(e) {
+    var total = parseFloat($('#txttotal').val()) || 0;
+    var paid = parseFloat($('#txtpaid').val()) || 0;
+    
+    if(paid < total) {
+      e.preventDefault();
+      Swal.fire({
+        icon: 'error',
+        title: 'Insufficient Payment!',
+        text: 'Amount paid (₱' + paid.toFixed(2) + ') is less than total (₱' + total.toFixed(2) + ')',
+        confirmButtonColor: '#d33'
+      });
+      return false;
+    }
+    
+    if($('.details tr').length <= 1) {
+      e.preventDefault();
+      Swal.fire({
+        icon: 'warning',
+        title: 'No Products!',
+        text: 'Please add products to the order',
+        confirmButtonColor: '#f39c12'
+      });
+      return false;
+    }
+  });
 </script>
+
+<?php if(isset($_SESSION['status']) && $_SESSION['status'] != ''): ?>
+<script>
+  Swal.fire({
+    icon: '<?php echo $_SESSION['status_code']; ?>',
+    title: '<?php echo $_SESSION['status']; ?>',
+    showConfirmButton: true
+  });
+</script>
+<?php 
+  unset($_SESSION['status']);
+  unset($_SESSION['status_code']);
+endif; 
+?>
