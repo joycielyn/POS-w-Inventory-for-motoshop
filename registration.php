@@ -1,353 +1,293 @@
 <?php
-
 include_once 'connectdb.php';
 session_start();
 
-
-if($_SESSION['useremail']=="" OR $_SESSION['role']=="User"){
-
-  header('location:../index.php');
-  
-  }
-
-
-   if($_SESSION['role']=="Admin"){
-
-    include_once"header.php";
-
-
-   }else{
-
-include_once"header.php";
-
-   }
-
-error_reporting(0);
-
-$id=$_GET['id'];
-
-if(isset($id)){
-
-$delete=$pdo->prepare("delete from tbl_user where userid =".$id);
-
-if($delete->execute()){
-  $_SESSION['status']="Account deleted successfully";
-  $_SESSION['status_code']="success";
-
-}else{
-
-  $_SESSION['status']="Account is not deleted";
-  $_SESSION['status_code']="warning";
-
- }
+if(!isset($_SESSION['useremail']) || $_SESSION['role'] != "Admin"){
+    header('location:../index.php');
+    exit;
 }
 
+/* DELETE */
+if(isset($_GET['delete'])){
+    $delete_id = $_GET['delete'];
+    $delete = $pdo->prepare("DELETE FROM tbl_user WHERE userid=:id");
+    $delete->bindParam(':id', $delete_id);
+
+    if($delete->execute()){
+        echo "<script>alert('User deleted successfully'); window.location='registration.php';</script>";
+        exit;
+    }
+}
+
+/* EDIT FETCH */
+$edit_mode = false;
+if(isset($_GET['edit'])){
+    $edit_id = $_GET['edit'];
+    $edit = $pdo->prepare("SELECT * FROM tbl_user WHERE userid=:id");
+    $edit->bindParam(':id', $edit_id);
+    $edit->execute();
+    $edit_user = $edit->fetch(PDO::FETCH_ASSOC);
+    if($edit_user){ $edit_mode = true; }
+}
+
+/* INSERT / UPDATE */
 if(isset($_POST['btnsave'])){
-  $username = $_POST['txtname'];
-  $useremail = $_POST['txtemail'];
-  $userpassword = $_POST['txtpassword'];
-  $useraddress = $_POST['txtaddress'];
-  $userage = $_POST['txtage'];
-  $usercontact = $_POST['txtcontact'];
-  $role = $_POST['txtselect_option'];
 
-  if(($_POST['txtage'])<18){
+    $username     = $_POST['txtname'];
+    $useremail    = $_POST['txtemail'];
+    $userpassword = $_POST['txtpassword'];
+    $useraddress  = $_POST['txtaddress'];
+    $userage      = $_POST['txtage'];
+    $usercontact  = $_POST['txtcontact'];
+    $role         = $_POST['txtrole'];
 
-    $_SESSION['status']="Minor are not allowed";
-    $_SESSION['status_code']="warning";
-  }
+    $imgName = null;
 
-elseif(isset($_POST['txtemail'])){
+    if(isset($_FILES['txtimage']) && $_FILES['txtimage']['error'] == 0){
+        $imgTmp  = $_FILES['txtimage']['tmp_name'];
+        $imgName = time().'_'.basename($_FILES['txtimage']['name']);
+        $imgPath = "uploads/".$imgName;
 
-$select=$pdo->prepare("select useremail from tbl_user where useremail='$useremail'");
+        if(!is_dir("uploads")){
+            mkdir("uploads", 0777, true);
+        }
+        move_uploaded_file($imgTmp, $imgPath);
+    }
 
-$select->execute();
+    if(isset($_POST['userid']) && !empty($_POST['userid'])){
 
+        if($imgName != null){
+            $update = $pdo->prepare("UPDATE tbl_user SET 
+                username=:name,useremail=:email,userpassword=:password,
+                useraddress=:address,userage=:age,usercontact=:contact,
+                role=:role,userimage=:image WHERE userid=:id");
+            $update->bindParam(':image',$imgName);
+        } else {
+            $update = $pdo->prepare("UPDATE tbl_user SET 
+                username=:name,useremail=:email,userpassword=:password,
+                useraddress=:address,userage=:age,usercontact=:contact,
+                role=:role WHERE userid=:id");
+        }
 
-if($select->rowCount()>0){
-  
+        $update->bindParam(':name',$username);
+        $update->bindParam(':email',$useremail);
+        $update->bindParam(':password',$userpassword);
+        $update->bindParam(':address',$useraddress);
+        $update->bindParam(':age',$userage);
+        $update->bindParam(':contact',$usercontact);
+        $update->bindParam(':role',$role);
+        $update->bindParam(':id',$_POST['userid']);
 
-  $_SESSION['status']="Email already exists. Create Account From New Email";
-  $_SESSION['status_code']="warning";
+        if($update->execute()){
+            echo "<script>alert('User updated successfully'); window.location='registration.php';</script>";
+            exit;
+        }
 
-}else{
- 
-  if(isset($_POST['txtpassword'])){
+    } else {
 
+        $check = $pdo->prepare("SELECT * FROM tbl_user WHERE useremail=:email");
+        $check->bindParam(':email', $useremail);
+        $check->execute();
 
-    $select=$pdo->prepare("select userpassword from tbl_user where userpassword='$userpassword'");
-    
-    $select->execute();
-    
-    
-    if($select->rowCount()>0){
-    
-      $_SESSION['status']="password already exists. Create new password";
-      $_SESSION['status_code']="warning";
-    
-    
-    }else{
- 
-  $insert=$pdo->prepare("insert into tbl_user (username,useremail,userpassword,useraddress,userage,usercontact,role) values (:name,:email,:password,:address,:age,:contact,:role)");
+        if($check->rowCount() > 0){
+            echo "<script>alert('This email is already registered.');</script>";
+        } else {
 
-  $insert->bindParam(':name',$username);
-  $insert->bindParam(':email',$useremail);
-  $insert->bindParam(':password',$userpassword);
-  $insert->bindParam(':address',$useraddress);
-  $insert->bindParam(':age',$userage);
-  $insert->bindParam(':contact',$usercontact);
-  $insert->bindParam(':role',$role);
+            if($imgName == null){ $imgName = "default.png"; }
 
-  if($insert->execute()){
-  
-  
-  $_SESSION['status']="Insert successfully the user into the database";
-  $_SESSION['status_code']="success";
-  
-  }else{
-   
-  $_SESSION['status']="Error inserting the user into the database";
-  $_SESSION['status_code']="error";
-  
-  }
-  
+            $insert = $pdo->prepare("INSERT INTO tbl_user 
+            (username,useremail,userpassword,useraddress,userage,usercontact,role,userimage) 
+            VALUES (:name,:email,:password,:address,:age,:contact,:role,:image)");
+
+            $insert->bindParam(':name',$username);
+            $insert->bindParam(':email',$useremail);
+            $insert->bindParam(':password',$userpassword);
+            $insert->bindParam(':address',$useraddress);
+            $insert->bindParam(':age',$userage);
+            $insert->bindParam(':contact',$usercontact);
+            $insert->bindParam(':role',$role);
+            $insert->bindParam(':image',$imgName);
+
+            if($insert->execute()){
+                echo "<script>alert('User registered successfully'); window.location='registration.php';</script>";
+                exit;
+            }
+        }
+    }
 }
 
-}
-  
-  }
-}
-
-}
-
+include_once "header.php";
 ?>
 
+<style>
+body{
+    background:#f4f6f9;
+    font-family: 'Segoe UI', sans-serif;
+}
 
-  <!-- Content Wrapper. Contains page content -->
-  <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <div class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <h1 class="m-0">Registration</h1>
-          </div><!-- /.col -->
-          <div class="col-sm-6">
-            <ol class="breadcrumb float-sm-right">
-             
-            </ol>
-          </div><!-- /.col -->
-        </div><!-- /.row -->
-      </div><!-- /.container-fluid --
-    </div>
-    <-- /.content-header -->
+.card-box{
+    background:#fff;
+    padding:25px;
+    border-radius:12px;
+    box-shadow:0 4px 15px rgba(0,0,0,0.08);
+}
 
-    <!-- Main content -->
-    <div class="content">
-      <div class="container-fluid">
-        
-            
+.btn-main{
+    background:#007bff;
+    color:#fff;
+    padding:10px 18px;
+    border:none;
+    border-radius:6px;
+}
+.btn-success{
+    background:#28a745;
+    color:#fff;
+    border:none;
+    padding:6px 12px;
+    border-radius:6px;
+}
+.btn-danger{
+    background:#dc3545;
+    color:#fff;
+    border:none;
+    padding:6px 12px;
+    border-radius:6px;
+}
 
-          <div class="card card-primary card-outline">
-              <div class="card-header">
-                <h5 class="m-0">Registration</h5>
-              </div>
-              <div class="card-body">
+input, select{
+    width:100%;
+    padding:10px;
+    border:1px solid #ddd;
+    border-radius:6px;
+    margin-bottom:12px;
+}
 
-<div class="row">
-<div class="col-md-4">
+table{
+    width:100%;
+    border-collapse:collapse;
+}
 
-<form action="" method="post">
-                
-                  <div class="form-group">
-                    <label for="exampleInputEmail1">Name</label>
-                    <input type="text" class="form-control" placeholder="Enter name" name="txtname" required>
-                  </div>
+table thead{
+    background:#007bff;
+    color:#fff;
+}
 
-                  <div class="form-group">
-                    <label for="exampleInputEmail1">Email Address</label>
-                    <input type="email" class="form-control" placeholder="Enter email" name="txtemail" required>
-                  </div>
+table th, table td{
+    padding:12px;
+    text-align:center;
+}
 
-                  <div class="form-group">
-                    <label for="exampleInputPassword1">Password</label>
-                    <input type="password" class="form-control"  placeholder="Password" name="txtpassword" required>
-                  </div>
+table tbody tr:nth-child(even){
+    background:#f9f9f9;
+}
 
-                  <div class="form-group">
-                    <label for="exampleInputAddress">Address</label>
-                    <input type="Address" class="form-control" placeholder="Address" name="txtaddress" required>
-                  </div>
+.user-img{
+    width:45px;
+    height:45px;
+    border-radius:50%;
+    object-fit:cover;
+    border:2px solid #ddd;
+}
+</style>
 
-                  <div class="form-group">
-                    <label for="exampleInputAge">Age</label>
-                    <input type="number" class="form-control"  placeholder="Enter Age" name="txtage" required>
-                  </div>
+<div class="content-wrapper" style="padding:25px;">
+<div class="card-box">
 
-                  <div class="form-group">
-                    <label for="exampleInputContact">Contact</label>
-                    <input type="Contact" class="form-control" placeholder="Contact" name="txtcontact" required>
-                  </div>
+<h3>User Registration Management</h3>
 
-                  <div class="form-group">
-                        <label>Role</label>
-                        <select class="form-control" name="txtselect_option" required>
-                          <option value="" disabled selected>Select Role</option>
-                          <option>Admin</option>
-                          <option>User</option>
-                          
-                        </select>
-                      </div>
-               
+<button id="showRegisterForm" class="btn-main">+ Register New User</button>
 
-                <div class="card-footer">
-                  <button type="submit" class="btn btn-primary" name="btnsave">Save</button>
-                </div>
-              </form>
+<br><br>
 
+<div id="registerForm" style="<?php echo $edit_mode ? 'display:block;' : 'display:none;'; ?>">
 
+<form method="POST" enctype="multipart/form-data">
 
+<input type="hidden" name="userid" value="<?php if($edit_mode) echo $edit_user['userid']; ?>">
 
+<input type="text" name="txtname" placeholder="Full Name" required value="<?php if($edit_mode) echo $edit_user['username']; ?>">
+<input type="email" name="txtemail" placeholder="Email Address" required value="<?php if($edit_mode) echo $edit_user['useremail']; ?>">
+<input type="password" name="txtpassword" placeholder="Password" required value="<?php if($edit_mode) echo $edit_user['userpassword']; ?>">
+<input type="text" name="txtaddress" placeholder="Address" required value="<?php if($edit_mode) echo $edit_user['useraddress']; ?>">
+<input type="number" name="txtage" placeholder="Age" required value="<?php if($edit_mode) echo $edit_user['userage']; ?>">
+<input type="text" name="txtcontact" placeholder="Contact Number" required value="<?php if($edit_mode) echo $edit_user['usercontact']; ?>">
+
+<select name="txtrole" required>
+<option value="">Select Role</option>
+<option value="Admin" <?php if($edit_mode && $edit_user['role']=="Admin") echo "selected"; ?>>Admin</option>
+<option value="User" <?php if($edit_mode && $edit_user['role']=="User") echo "selected"; ?>>User</option>
+</select>
+
+<input type="file" name="txtimage">
+
+<button type="submit" name="btnsave" class="btn-success">
+<?php echo $edit_mode ? "Update User" : "Save User"; ?>
+</button>
+
+<a href="registration.php" class="btn-danger" style="text-decoration:none;">Cancel</a>
+
+</form>
 </div>
 
+<div id="usersTable" style="<?php echo $edit_mode ? 'display:none;' : 'display:block;'; ?>">
 
-
-
-
-
-<div class="col-md-8">
-
-<table class="table table-striped table-hover">
+<table>
 <thead>
-<tr> 
- <td>#</td>
- <td>Name</td>
- <td>Email</td>
- <td>Password</td>
- <td>Address</td>
- <td>Age</td>
- <td>Contact</td>
- <td>Role</td>
- <td>Edit</td>
- <td>Delete</td>
-</tr>
-
-</thead>
-
-
-<?php
-
-$select = $pdo->prepare("select * from tbl_user order by userid ASC");
-$select->execute();
-
-while($row=$select->fetch(PDO::FETCH_OBJ))
-{
-
-echo'
 <tr>
-<td>'.$row->userid.'</td>
-<td>'.$row->username.'</td>
-<td>'.$row->useremail.'</td>
-<td>'.$row->userpassword.'</td>
-<td>'.$row->useraddress.'</td>
-<td>'.$row->userage.'</td>
-<td>'.$row->usercontact.'</td>
-<td>'.$row->role.'</td>
-<td>
-
- <button type="submit" class="btn btn-primary btn-edit" value="'.$row->userid.'" name="btnedit">Edit</button>
- </td>
- <td>
-<a href="registration.php?id='.$row->userid.'" class="btn btn-danger delete-btn" data-id="'.$row->userid.'"><i class="fa fa-trash-alt"></i></a>
-</td>
-
-</tr>';
-
-}
-
-?>
-
+<th>ID</th>
+<th>Image</th>
+<th>Name</th>
+<th>Email</th>
+<th>Role</th>
+<th>Action</th>
+</tr>
+</thead>
 <tbody>
 
- <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@10"></script>
-<script> 
-      $(document).ready(function() {
-  $('.delete-btn').click(function(e) {
-    e.preventDefault();
+<?php
+$stmt = $pdo->prepare("SELECT userid, username, useremail, role, userimage FROM tbl_user ORDER BY userid DESC");
+$stmt->execute();
+$users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    var userId = $(this).data('id');
+foreach($users as $user){
 
-    Swal.fire({
-      title: 'Are you sure you want to delete this?',
-      text: 'Once deleted, you will not be able to recover this account!',
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#d63032',
-      cancelButtonColor: '#3085d6',
-      confirmButtonText: 'Delete now!'
-    }).then((result) => {
-      if (result.isConfirmed) {
-        window.location.href = 'registration.php?id=' + userId;
-      }
-    });
-  }); 
-});
+$imagePath = !empty($user['userimage']) && file_exists("uploads/".$user['userimage'])
+    ? "uploads/".$user['userimage']
+    : "uploads/default.png";
 
-</script>
-
-
+echo "<tr>
+<td>{$user['userid']}</td>
+<td><img src='{$imagePath}' class='user-img'></td>
+<td>{$user['username']}</td>
+<td>{$user['useremail']}</td>
+<td>{$user['role']}</td>
+<td>
+<div class='btn-group'>
+<a href='registration.php?edit={$user['userid']}' class='btn btn-success btn-xs' role='button'>
+<span class='fa fa-edit' data-toggle='tooltip' title='Edit User'></span>
+</a>
+<a href='registration.php?delete={$user['userid']}' onclick='return confirm(\"Delete this user?\")' class='btn btn-danger btn-xs' role='button'>
+<span class='fa fa-trash' data-toggle='tooltip' title='Delete User'></span>
+</a>
+</div>
+</td>
+</tr>";
+}
+?>
 
 </tbody>
-
 </table>
-
 
 </div>
 
+</div>
+</div>
 
-
-               
-               
-            </div>
-
-
-
-            </div>
-        </div>
-          <!-- /.col-md-6 -->
-          
-
-        
-
-           
-          
-      </div><!-- /.container-fluid -->
-    </div>
-    <!-- /.content -->
-  </div>
-  <!-- /.content-wrapper -->
-
-  <?php
-
-include_once"footer.php";
-
-?>
-
-<?php
- if(isset($_SESSION['status']) && $_SESSION['status']!='')
-
- {
-   
-?>
 <script>
-     Swal.fire({
-        icon: '<?php echo $_SESSION['status_code'];?>',
-        title: '<?php echo $_SESSION['status'];?>'
-      });
+document.getElementById("showRegisterForm").addEventListener("click", function() {
+    document.getElementById("registerForm").style.display = "block";
+    document.getElementById("usersTable").style.display = "none";
+});
 </script>
 
-<?php
-unset($_SESSION['status']);
-  }
-?>
+<?php include 'footer.php'; ?> 
