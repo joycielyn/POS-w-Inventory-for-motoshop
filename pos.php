@@ -46,8 +46,9 @@ if (isset($_POST['btnsaveorder'])) {
     
 
   // Insert invoice data into tbl_invoice table (removed sgst, cgst)
-  $insert = $pdo->prepare("INSERT INTO tbl_invoice(order_date, subtotal, discount, sgst, cgst, total, payment_type, due, paid) VALUES (:order_date, :subtotal, :discount, 0, 0, :total, :payment_type, :due, :paid)");
-  $insert->bindParam(':order_date', $orderdate);
+$insert = $pdo->prepare("
+INSERT INTO tbl_invoice
+(order_date, subtotal, discount, total, payment_type, due, paid)VALUES(:order_date, :subtotal, :discount, :total, :payment_type, :due, :paid)");  $insert->bindParam(':order_date', $orderdate);
   $insert->bindParam(':subtotal', $subtotal);
   $insert->bindParam(':discount', $discount);
   $insert->bindParam(':total', $total);
@@ -248,8 +249,9 @@ ob_end_flush();
     <div class="input-group-prepend">
         <span class="input-group-text">DISCOUNT(%)</span>
     </div>
-    <input type="text" class="form-control" name="txtdiscount"id="txtdiscount_p"value="<?php echo $row->discount; ?>">
-
+<input type="text" class="form-control" name="txtdiscount"
+id="txtdiscount_p"
+value="<?php echo isset($row->discount) ? $row->discount : 0; ?>">
     <div class="input-group-append">
         <span class="input-group-text">%</span>
     </div>
