@@ -2,26 +2,29 @@
 include_once 'connectdb.php';
 session_start();
 
-if(!isset($_SESSION['useremail']) || $_SESSION['role'] != "Admin"){
-    header('location:../index.php');
-    exit;
-}
+// Check if user is Admin
+$isAdmin = isset($_SESSION['useremail']) && $_SESSION['role'] === "Admin";
 
-/* DELETE */
-if(isset($_GET['delete'])){
+/* DELETE (only Admins) */
+if($isAdmin && isset($_GET['delete'])){
     $delete_id = $_GET['delete'];
     $delete = $pdo->prepare("DELETE FROM tbl_user WHERE userid=:id");
     $delete->bindParam(':id', $delete_id);
 
     if($delete->execute()){
-        echo "<script>alert('User deleted successfully'); window.location='registration.php';</script>";
+        $_SESSION['status'] = [
+            'type' => 'success',
+            'title' => 'Deleted!',
+            'message' => 'User deleted successfully'
+        ];
+        header("Location: registration.php");
         exit;
     }
 }
 
-/* EDIT FETCH */
+/* EDIT FETCH (only Admins) */
 $edit_mode = false;
-if(isset($_GET['edit'])){
+if($isAdmin && isset($_GET['edit'])){
     $edit_id = $_GET['edit'];
     $edit = $pdo->prepare("SELECT * FROM tbl_user WHERE userid=:id");
     $edit->bindParam(':id', $edit_id);
@@ -55,6 +58,16 @@ if(isset($_POST['btnsave'])){
     }
 
     if(isset($_POST['userid']) && !empty($_POST['userid'])){
+        // Only Admins can update users
+        if(!$isAdmin){
+            $_SESSION['status'] = [
+                'type' => 'error',
+                'title' => 'Access Denied',
+                'message' => 'You are not allowed to edit users'
+            ];
+            header("Location: registration.php");
+            exit;
+        }
 
         if($imgName != null){
             $update = $pdo->prepare("UPDATE tbl_user SET 
@@ -79,20 +92,30 @@ if(isset($_POST['btnsave'])){
         $update->bindParam(':id',$_POST['userid']);
 
         if($update->execute()){
-            echo "<script>alert('User updated successfully'); window.location='registration.php';</script>";
+            $_SESSION['status'] = [
+                'type' => 'success',
+                'title' => 'Updated!',
+                'message' => 'User updated successfully'
+            ];
+            header("Location: registration.php");
             exit;
         }
 
     } else {
-
+        // Anyone can register
         $check = $pdo->prepare("SELECT * FROM tbl_user WHERE useremail=:email");
         $check->bindParam(':email', $useremail);
         $check->execute();
 
         if($check->rowCount() > 0){
-            echo "<script>alert('This email is already registered.');</script>";
+            $_SESSION['status'] = [
+                'type' => 'error',
+                'title' => 'Oops!',
+                'message' => 'This email is already registered'
+            ];
+            header("Location: registration.php");
+            exit;
         } else {
-
             if($imgName == null){ $imgName = "default.png"; }
 
             $insert = $pdo->prepare("INSERT INTO tbl_user 
@@ -109,7 +132,12 @@ if(isset($_POST['btnsave'])){
             $insert->bindParam(':image',$imgName);
 
             if($insert->execute()){
-                echo "<script>alert('User registered successfully'); window.location='registration.php';</script>";
+                $_SESSION['status'] = [
+                    'type' => 'success',
+                    'title' => 'Registered!',
+                    'message' => 'User registered successfully'
+                ];
+                header("Location: registration.php");
                 exit;
             }
         }
@@ -119,19 +147,20 @@ if(isset($_POST['btnsave'])){
 include_once "header.php";
 ?>
 
+<!-- SweetAlert2 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
 <style>
 body{
     background:#f4f6f9;
     font-family: 'Segoe UI', sans-serif;
 }
-
 .card-box{
     background:#fff;
     padding:25px;
     border-radius:12px;
     box-shadow:0 4px 15px rgba(0,0,0,0.08);
 }
-
 .btn-main{
     background:#007bff;
     color:#fff;
@@ -153,7 +182,6 @@ body{
     padding:6px 12px;
     border-radius:6px;
 }
-
 input, select{
     width:100%;
     padding:10px;
@@ -161,26 +189,21 @@ input, select{
     border-radius:6px;
     margin-bottom:12px;
 }
-
 table{
     width:100%;
     border-collapse:collapse;
 }
-
 table thead{
     background:#007bff;
     color:#fff;
 }
-
 table th, table td{
     padding:12px;
     text-align:center;
 }
-
 table tbody tr:nth-child(even){
     background:#f9f9f9;
 }
-
 .user-img{
     width:45px;
     height:45px;
@@ -229,6 +252,7 @@ table tbody tr:nth-child(even){
 </form>
 </div>
 
+<?php if($isAdmin): ?>
 <div id="usersTable" style="<?php echo $edit_mode ? 'display:none;' : 'display:block;'; ?>">
 
 <table>
@@ -266,7 +290,7 @@ echo "<tr>
 <a href='registration.php?edit={$user['userid']}' class='btn btn-success btn-xs' role='button'>
 <span class='fa fa-edit' data-toggle='tooltip' title='Edit User'></span>
 </a>
-<a href='registration.php?delete={$user['userid']}' onclick='return confirm(\"Delete this user?\")' class='btn btn-danger btn-xs' role='button'>
+<a href='#' onclick='confirmDelete({$user['userid']})' class='btn btn-danger btn-xs' role='button'>
 <span class='fa fa-trash' data-toggle='tooltip' title='Delete User'></span>
 </a>
 </div>
@@ -279,15 +303,50 @@ echo "<tr>
 </table>
 
 </div>
+<?php endif; ?>
 
 </div>
 </div>
 
 <script>
+// Show register form
 document.getElementById("showRegisterForm").addEventListener("click", function() {
     document.getElementById("registerForm").style.display = "block";
+    <?php if($isAdmin): ?>
     document.getElementById("usersTable").style.display = "none";
+    <?php endif; ?>
 });
+
+// Smooth SweetAlert Delete Confirmation
+function confirmDelete(id){
+    Swal.fire({
+        title: 'Are you sure?',
+        text: "This user will be deleted!",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'Yes, delete it!',
+        reverseButtons: true
+    }).then((result) => {
+        if (result.isConfirmed) {
+            window.location.href = 'registration.php?delete=' + id;
+        }
+    });
+}
+
+// Show SweetAlert for session flash messages
+<?php if(isset($_SESSION['status'])): ?>
+Swal.fire({
+    icon: '<?php echo $_SESSION['status']['type']; ?>',
+    title: '<?php echo $_SESSION['status']['title']; ?>',
+    text: '<?php echo $_SESSION['status']['message']; ?>',
+    showConfirmButton: true,
+    confirmButtonColor: '<?php echo $_SESSION['status']['type']=="success"?"#28a745":"#dc3545"; ?>',
+    timer: 1500,
+    timerProgressBar: true
+});
+<?php unset($_SESSION['status']); endif; ?>
 </script>
 
-<?php include 'footer.php'; ?> 
+<?php include 'footer.php'; ?>
