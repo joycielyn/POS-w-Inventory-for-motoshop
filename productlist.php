@@ -6,7 +6,7 @@
         header('location:../index.php');
     }
 
-    include_once "header.php";
+
 
     // ================= ADD PRODUCT LOGIC =================
     if(isset($_POST['btnsave'])){
@@ -230,6 +230,9 @@
         // Clear output buffer if still active
         if(ob_get_level() > 0) ob_end_clean();
     }
+
+
+        include_once "header.php";
     ?>
 
     <!-- Content Wrapper -->
