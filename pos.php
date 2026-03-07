@@ -22,6 +22,7 @@ if (isset($_POST['btnsaveorder'])) {
   $orderdate      = date('Y-m-d');
   $subtotal       = $_POST['txtsubtotal'];
   $discount       = $_POST['txtdiscount'];
+  $vat            = $_POST['txtvat'];
   $total          = $_POST['txttotal'];
   $payment_type   = 'Cash'; // Only Cash payment
   $due            = $_POST['txtdue'];
@@ -45,16 +46,20 @@ if (isset($_POST['btnsaveorder'])) {
 
     
 
-  // Insert invoice data into tbl_invoice table (removed sgst, cgst)
-$insert = $pdo->prepare("
-INSERT INTO tbl_invoice
-(order_date, subtotal, discount, total, payment_type, due, paid)VALUES(:order_date, :subtotal, :discount, :total, :payment_type, :due, :paid)");  $insert->bindParam(':order_date', $orderdate);
-  $insert->bindParam(':subtotal', $subtotal);
-  $insert->bindParam(':discount', $discount);
-  $insert->bindParam(':total', $total);
+  // Insert invoice data into tbl_invoice table
+  $insert = $pdo->prepare("
+    INSERT INTO tbl_invoice
+    (order_date, subtotal, discount, vat, total, payment_type, due, paid)
+    VALUES(:order_date, :subtotal, :discount, :vat, :total, :payment_type, :due, :paid)
+  ");
+  $insert->bindParam(':order_date',   $orderdate);
+  $insert->bindParam(':subtotal',     $subtotal);
+  $insert->bindParam(':discount',     $discount);
+  $insert->bindParam(':vat',          $vat);
+  $insert->bindParam(':total',        $total);
   $insert->bindParam(':payment_type', $payment_type);
-  $insert->bindParam(':due', $due);
-  $insert->bindParam(':paid', $paid);
+  $insert->bindParam(':due',          $due);
+  $insert->bindParam(':paid',         $paid);
   $insert->execute();
 
   $invoice_id = $pdo->lastInsertId();
@@ -267,7 +272,39 @@ value="<?php echo isset($row->discount) ? $row->discount : 0; ?>">
                   <div class="input-group-append">
                     <span class="input-group-text">₱</span>
                   </div>
-                </div> 
+                </div>
+
+                <div class="input-group mt-1">
+                  <div class="input-group-prepend">
+                    <span class="input-group-text">VAT(%)</span>
+                  </div>
+                  <?php
+                    $defaultVat = isset($row->tax) ? (float)$row->tax : 0;
+                    $presetVats = [0, 10, 20, 30, 40, 50];
+                  ?>
+                  <select class="form-control" id="txtvat_p" name="txtvat_p">
+                    <?php if(!in_array($defaultVat, $presetVats, true)): ?>
+                      <option value="<?php echo $defaultVat; ?>" selected><?php echo $defaultVat; ?>%</option>
+                    <?php endif; ?>
+
+                    <?php foreach($presetVats as $v): ?>
+                      <option value="<?php echo $v; ?>" <?php echo ($v == $defaultVat) ? 'selected' : ''; ?>><?php echo $v; ?>%</option>
+                    <?php endforeach; ?>
+                  </select>
+                  <div class="input-group-append">
+                    <span class="input-group-text">%</span>
+                  </div>
+                </div>
+
+                <div class="input-group mt-1">
+                  <div class="input-group-prepend">
+                    <span class="input-group-text">VAT(₱)</span>
+                  </div>
+                  <input type="text" class="form-control" id="txtvat_n" name="txtvat" readonly>
+                  <div class="input-group-append">
+                    <span class="input-group-text">₱</span>
+                  </div>
+                </div>
 
                     <hr style="height: 2px; border-width:0; color:black; background-color:black;">
 
@@ -603,52 +640,49 @@ $("#txtbarcode_id").val("");
   function calculate(dis, paid) {
 
     var subtotal = 0;
-    var discount = dis;
-    var total = 0;
     var paid_amt = paid;
-    var due = 0;
 
     $(".saleprice").each(function() {
-
       subtotal = subtotal + $(this).val() * 1;
-
-
     });
 
     $("#txtsubtotal_id").val(subtotal.toFixed(2));
 
-    discount = parseFloat($("#txtdiscount_p").val());
+    var discountPct = parseFloat($("#txtdiscount_p").val()) || 0;
+    var discountAmt = (discountPct / 100) * subtotal;
+    $("#txtdiscount_n").val(discountAmt.toFixed(2));
 
-    discount = discount / 100;
-    discount = discount * subtotal;
+    var afterDiscount = subtotal - discountAmt;
 
-    $("#txtdiscount_n").val(discount.toFixed(2));
+    var vatPct = parseFloat($("#txtvat_p").val()) || 0;
+    // VAT is DISPLAY-ONLY (included in the amount), so subtotal/total stay the same.
+    // Extract VAT from the amount: vat = amount - amount/(1+rate)
+    var vatRate = vatPct / 100;
+    var vatAmt = vatRate > 0 ? (afterDiscount - (afterDiscount / (1 + vatRate))) : 0;
+    $("#txtvat_n").val(vatAmt.toFixed(2));
 
-    total = subtotal - discount;
-    due = total - paid_amt;
+    var total = afterDiscount;
+    var due   = total - paid_amt;
 
     $("#txttotal").val(total.toFixed(2));
-
     $("#txtdue").val(due.toFixed(2));
-
 
   } //calculate function
 
 
   $("#txtdiscount_p").keyup(function() {
+    calculate($(this).val(), 0);
+  });
 
-    var discount = $(this).val();
-
-    calculate(discount, 0);
-
+  $("#txtvat_p").on('change', function() {
+    var paid = parseFloat($("#txtpaid").val()) || 0;
+    calculate($("#txtdiscount_p").val(), paid);
   });
 
   $("#txtpaid").keyup(function() {
-
     var paid = $(this).val();
     var discount = $("#txtdiscount_p").val();
     calculate(discount, paid);
-
   });
 
 
