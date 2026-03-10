@@ -56,7 +56,7 @@
     <!-- Brand Logo -->
     <a href="profile.php" class="brand-link">
       <img src="../dist/img/logo.jpg" alt="AdminLTE Logo" class="brand-image img-circle elevation-3" style="opacity: .8">
-      <span class="brand-text font-weight-light">Concepcion</span>
+      <span class="brand-text font-weight-light">MOTORSHOP</span>
     </a>
 
     <!-- Sidebar -->
