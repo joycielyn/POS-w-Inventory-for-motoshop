@@ -63,7 +63,10 @@
       <!-- Sidebar user panel (optional) -->
       <div class="user-panel mt-3 pb-3 mb-3 d-flex">
         <div class="image">
-          <img src="../dist/img/logo.jpg" class="img-circle elevation-2" alt="User Image">
+          <!-- <img src="../dist/img/logo.jpg" class="img-circle elevation-2" alt="User Image"> -->
+          <img src="uploads/test.png ?php echo $_SESSION['userimage']; ?>" 
+         class="img-circle elevation-2" 
+         alt="User Image">
         </div>
         <div class="info">
           <!-- Make the username text white -->
@@ -86,6 +89,15 @@
               <i class="nav-icon fas fa-table"></i>
               <p>
                 Supplier
+                
+              </p>
+            </a>
+          </li> 
+                  <li class="nav-item">
+            <a href="category.php" class="nav-link">
+              <i class="nav-icon fas fa-table"></i>
+              <p>
+                Category
                 
               </p>
             </a>
@@ -196,7 +208,7 @@
       background-color: #000 !important; /* Ensure dark sidebar is black */
     }
 
-    /* Make the brand text (Hubek Cafe) white */
+    
     .sidebar .brand-text {
       color: #fff !important; /* White color for brand text */
     }
