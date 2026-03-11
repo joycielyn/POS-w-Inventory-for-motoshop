@@ -7,7 +7,20 @@ include_once "header.php";
 
 function fill_product($pdo) {
   $output = '';
-  $select = $pdo->prepare("SELECT * FROM tbl_product ORDER BY product ASC");
+
+  // Hide archived products
+  $hasArchivedCol = false;
+  try {
+    $chk = $pdo->query("SHOW COLUMNS FROM tbl_product LIKE 'is_archived'");
+    $hasArchivedCol = ($chk && $chk->rowCount() > 0);
+  } catch(Exception $e) { $hasArchivedCol = false; }
+
+  if($hasArchivedCol){
+    $select = $pdo->prepare("SELECT * FROM tbl_product WHERE (is_archived = 0 OR is_archived IS NULL) ORDER BY product ASC");
+  } else {
+    $select = $pdo->prepare("SELECT * FROM tbl_product ORDER BY product ASC");
+  }
+
   $select->execute();
   $result = $select->fetchAll();
   foreach ($result as $row) {
