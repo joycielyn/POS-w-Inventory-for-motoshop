@@ -1,827 +1,854 @@
 <?php
+
 ob_start();
+
 include_once 'connectdb.php';
 session_start();
 
-if($_SESSION['useremail'] == ""){
-    header('location:../index.php');
+include_once "headeruser.php";
+
+function fill_product($pdo){
+  $output='';
+  $select=$pdo->prepare("SELECT * FROM tbl_product ORDER BY product ASC");
+  $select->execute();
+  $result=$select->fetchAll();
+  foreach($result as $row){
+    $output.='<option value="'.$row['pid'].'">'.$row['product'].'</option>';
+  }
+  return $output;
+}
+
+if (isset($_POST['btnsaveorder'])) {
+  $orderdate      = date('Y-m-d');
+  $subtotal       = $_POST['txtsubtotal'];
+  $discount       = $_POST['txtdiscount'];
+  $vat            = $_POST['txtvat'];
+  $total          = $_POST['txttotal'];
+  $payment_type   = 'Cash'; // Only Cash payment
+  $due            = $_POST['txtdue'];
+  $paid           = $_POST['txtpaid'];
+  
+  // Validate payment - paid amount must be >= total
+  if(floatval($paid) < floatval($total)){
+    $_SESSION['status'] = "Insufficient payment! Amount paid is less than total.";
+    $_SESSION['status_code'] = "error";
+    header('location:pos.php');
     exit();
-}
+  }
 
-// ===== SAVE ORDER =====
-if(isset($_POST['btnsaveorder'])){
-    $orderdate    = date('Y-m-d H:i:s');
-    $subtotal     = $_POST['txtsubtotal'];
-    $discount     = $_POST['txtdiscount'];
-    $vat = isset($_POST['txtvat']) ? $_POST['txtvat'] : 0;
-    $total        = $_POST['txttotal'];
-    $due          = $_POST['txtdue'];
-    $paid         = $_POST['txtpaid'];
-    $cashier      = $_SESSION['username'];
+  $arr_pid     = $_POST['pid_arr'];
+  $arr_barcode = $_POST['barcode_arr'];
+  $arr_name    = $_POST['product_arr'];
+  $arr_stock   = $_POST['stock_c_arr'];
+  $arr_qty     = $_POST['quantity_arr'];
+  $arr_price   = $_POST['price_c_arr'];
+  $arr_total   = $_POST['saleprice_arr'];
 
-    if(floatval($paid) < floatval($total)){
-        $_SESSION['pos_status']      = "Insufficient payment! Amount paid is less than total.";
-        $_SESSION['pos_status_code'] = "error";
-        header('location:userpos.php');
-        exit();
-    }
-    if(!isset($_POST['pid_arr'])){
-    $_SESSION['pos_status'] = "No products in cart!";
-    $_SESSION['pos_status_code'] = "error";
-    header('location:userpos.php');
-    exit();
-}
+    
 
-        $arr_pid     = $_POST['pid_arr'];
-        $arr_barcode = $_POST['barcode_arr'];
-        $arr_name    = $_POST['product_arr'];
-        $arr_stock   = $_POST['stock_c_arr'];
-        $arr_qty     = $_POST['quantity_arr'];
-        $arr_price   = $_POST['price_c_arr'];
-        $arr_total   = $_POST['saleprice_arr'];
+  // Insert invoice data into tbl_invoice table
+  $insert = $pdo->prepare("
+    INSERT INTO tbl_invoice
+    (order_date, subtotal, discount, vat, total, payment_type, due, paid)
+    VALUES(:order_date, :subtotal, :discount, :vat, :total, :payment_type, :due, :paid)
+  ");
+  $insert->bindParam(':order_date',   $orderdate);
+  $insert->bindParam(':subtotal',     $subtotal);
+  $insert->bindParam(':discount',     $discount);
+  $insert->bindParam(':vat',          $vat);
+  $insert->bindParam(':total',        $total);
+  $insert->bindParam(':payment_type', $payment_type);
+  $insert->bindParam(':due',          $due);
+  $insert->bindParam(':paid',         $paid);
+  $insert->execute();
 
-    // Check which optional columns exist in tbl_invoice
-    $hasVat     = false;
-    $hasCashier = false;
-    try {
-        $chk = $pdo->query("SHOW COLUMNS FROM tbl_invoice");
-        foreach($chk->fetchAll(PDO::FETCH_ASSOC) as $col){
-            if($col['Field'] === 'vat')     $hasVat     = true;
-            if($col['Field'] === 'cashier') $hasCashier = true;
-        }
-    } catch(Exception $e){}
+  $invoice_id = $pdo->lastInsertId();
 
-    // Build INSERT dynamically based on existing columns
-    $cols   = "order_date, subtotal, discount, total, payment_type, due, paid";
-    $params = ":order_date, :subtotal, :discount, :total, 'Cash', :due, :paid";
-    if($hasVat)     { $cols .= ", vat";     $params .= ", :vat"; }
-    if($hasCashier) { $cols .= ", cashier"; $params .= ", :cashier"; }
-
-    try {
-        $insert = $pdo->prepare("INSERT INTO tbl_invoice ($cols) VALUES ($params)");
-        $insert->bindParam(':order_date', $orderdate);
-        $insert->bindParam(':subtotal',   $subtotal);
-        $insert->bindParam(':discount',   $discount);
-        $insert->bindParam(':total',      $total);
-        $insert->bindParam(':due',        $due);
-        $insert->bindParam(':paid',       $paid);
-        if($hasVat)     $insert->bindParam(':vat',     $vat);
-        if($hasCashier) $insert->bindParam(':cashier', $cashier);
-        $insert->execute();
-    } catch(Exception $e){
-        $_SESSION['pos_status']      = "DB Error (invoice): " . $e->getMessage();
-        $_SESSION['pos_status_code'] = "error";
-        header('location:userpos.php');
-        exit();
+  if($invoice_id != null){
+    // Process invoice details and update stock
+    for($i = 0; $i < count($arr_pid); $i++){
+      $rem_qty = $arr_stock[$i] - $arr_qty[$i];
+      if($rem_qty < 0){
+        echo "Order is not completed"; // Handle this case appropriately
+      }else{
+        $update = $pdo->prepare("UPDATE tbl_product SET stock = :rem_qty WHERE pid = :pid");
+        $update->bindParam(':rem_qty', $rem_qty);
+        $update->bindParam(':pid', $arr_pid[$i]);
+        $update->execute();
+      }
+      
+      // Insert invoice details into tbl_invoice_details table
+      $insert_detail = $pdo->prepare("INSERT INTO tbl_invoice_details (invoice_id, barcode, product_id, product_name, qty, rate, saleprice, order_date) VALUES (:invid, :barcode, :pid, :name, :qty, :rate, :saleprice, :order_date)");
+      $insert_detail->bindParam(':invid', $invoice_id);
+      $insert_detail->bindParam(':barcode', $arr_barcode[$i]);
+      $insert_detail->bindParam(':pid', $arr_pid[$i]);
+      $insert_detail->bindParam(':name', $arr_name[$i]);
+      $insert_detail->bindParam(':qty', $arr_qty[$i]);
+      $insert_detail->bindParam(':rate', $arr_price[$i]);
+      $insert_detail->bindParam(':saleprice', $arr_total[$i]);
+      $insert_detail->bindParam(':order_date', $orderdate);
+      
+      if(!$insert_detail->execute()){
+        print_r($insert_detail->errorInfo()); // Print error information if execution fails
+      }
     }
 
-    $invoice_id = (int)$pdo->lastInsertId();
+    header('location:userorderlist.php');
+  }
 
-    if($invoice_id > 0){
-        for($i = 0; $i < count($arr_pid); $i++){
-            $rem_qty = intval($arr_stock[$i]) - intval($arr_qty[$i]);
-            if($rem_qty >= 0){
-                $upd = $pdo->prepare("UPDATE tbl_product SET stock = :s WHERE pid = :p");
-                $upd->bindParam(':s', $rem_qty);
-                $upd->bindParam(':p', $arr_pid[$i]);
-                $upd->execute();
-            }
-            $ins = $pdo->prepare("
-               INSERT INTO tbl_invoice_details
-                (invoice_id, barcode, product_id, product_name, qty, rate, saleprice)
-                VALUES (:inv, :bc, :pid, :name, :qty, :rate, :sp)
-            ");
-            $ins->bindParam(':inv',  $invoice_id);
-            $ins->bindParam(':bc',   $arr_barcode[$i]);
-            $ins->bindParam(':pid',  $arr_pid[$i]);
-            $ins->bindParam(':name', $arr_name[$i]);
-            $ins->bindParam(':qty',  $arr_qty[$i]);
-            $ins->bindParam(':rate', $arr_price[$i]);
-            $ins->bindParam(':sp',   $arr_total[$i]);
-            $ins->bindParam(':od',   $orderdate);
-            $ins->execute();
-        }
-        // Store invoice_id in session for receipt redirect
-        $_SESSION['last_invoice_id'] = $invoice_id;
-        header('location:userpos.php?success=1&inv=' . $invoice_id);
-        exit();
-    }
 }
 
-// Fetch tax/discount defaults
-$taxrow = null;
-try {
-    $q = $pdo->prepare("SELECT * FROM tbl_taxdis LIMIT 1");
-    $q->execute();
-    $taxrow = $q->fetch(PDO::FETCH_OBJ);
-} catch(Exception $e){}
-
-$default_discount = isset($taxrow->discount) ? (float)$taxrow->discount : 0;
-$default_vat      = isset($taxrow->tax)      ? (float)$taxrow->tax      : 0;
+$select = $pdo->prepare("SELECT * FROM tbl_taxdis");
+$select->execute();
+$row = $select->fetch(PDO::FETCH_OBJ);
 
 ob_end_flush();
 
-include_once "headeruser.php";
 ?>
+
+<style type="text/css">
+  /* ===== POS Modern Design ===== */
+
+  .pos-left-panel {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+    padding: 20px;
+    height: calc(100vh - 110px);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .pos-panel-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pos-panel-title i { color: #4361ee; }
+
+  .pos-search-row { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+
+  .pos-search-row .input-group-text {
+    background: #1a1a2e;
+    color: #fff;
+    border: none;
+    border-radius: 8px 0 0 8px;
+  }
+  .pos-search-row .form-control {
+    border-radius: 0 8px 8px 0 !important;
+    border: 1.5px solid #e0e0e0;
+    font-size: 14px;
+  }
+  .pos-search-row .form-control:focus {
+    border-color: #4361ee;
+    box-shadow: 0 0 0 3px rgba(67,97,238,0.12);
+  }
+
+  .pos-table-wrap {
+    flex: 1;
+    overflow-y: auto;
+    border-radius: 10px;
+    border: 1.5px solid #e8e8f0;
+    margin-top: 6px;
+  }
+  .pos-table-wrap::-webkit-scrollbar { width: 5px; }
+  .pos-table-wrap::-webkit-scrollbar-track { background: #f1f1f1; }
+  .pos-table-wrap::-webkit-scrollbar-thumb { background: #c0c0d0; border-radius: 4px; }
+
+  #producttable { width: 100%; border-collapse: collapse; margin: 0; }
+  #producttable thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #1a1a2e;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 12px 14px;
+    border: none;
+  }
+  #producttable tbody tr { transition: background 0.15s; }
+  #producttable tbody tr:hover { background: #f4f6ff; }
+  #producttable tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #f0f0f5;
+    vertical-align: middle;
+    font-size: 14px;
+  }
+  #producttable tbody tr:last-child td { border-bottom: none; }
+
+  /* ===== Right Panel ===== */
+  .pos-right-panel {
+    background: #1a1a2e;
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+    padding: 22px 20px;
+    height: calc(100vh - 110px);
+    display: flex;
+    flex-direction: column;
+    color: #fff;
+    overflow-y: auto;
+  }
+  .pos-right-panel::-webkit-scrollbar { width: 4px; }
+  .pos-right-panel::-webkit-scrollbar-thumb { background: #3a3a5e; border-radius: 4px; }
+
+  .pos-summary-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pos-summary-title i { color: #4cc9f0; }
+
+  .summary-block {
+    background: #252545;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .summary-label {
+    font-size: 11px;
+    color: #a0a0c0;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .summary-input {
+    background: #1a1a35 !important;
+    border: 1.5px solid #3a3a5e !important;
+    color: #fff !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    text-align: right;
+    padding: 7px 12px !important;
+    width: 100%;
+    display: block;
+  }
+  .summary-input:focus {
+    border-color: #4361ee !important;
+    box-shadow: 0 0 0 3px rgba(67,97,238,0.18) !important;
+    outline: none;
+  }
+  .summary-input[readonly] { opacity: 0.85; cursor: default; }
+
+  .summary-select {
+    background: #1a1a35 !important;
+    border: 1.5px solid #3a3a5e !important;
+    color: #fff !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    padding: 7px 12px !important;
+    width: 100%;
+  }
+
+  .total-block {
+    background: linear-gradient(135deg, #4361ee, #3a0ca3);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin: 10px 0;
+    text-align: center;
+  }
+  .total-block .total-label {
+    font-size: 11px;
+    color: rgba(255,255,255,0.75);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+  }
+  .total-block .total-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: 1px;
+  }
+
+  .payment-type-btn {
+    background: #4361ee;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    margin-bottom: 10px;
+    cursor: default;
+  }
+
+  .paid-block {
+    background: #1e3a5f;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    border: 1.5px solid #2563eb;
+  }
+  .paid-block .summary-label { color: #7dd3fc; }
+  .paid-input {
+    background: #0f2744 !important;
+    border: 1.5px solid #2563eb !important;
+    color: #7dd3fc !important;
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    text-align: right;
+  }
+
+  .change-block {
+    background: #1b3a2e;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    border: 1.5px solid #16a34a;
+  }
+  .change-block .summary-label { color: #86efac; }
+  .change-input {
+    background: #0f2a1e !important;
+    border: 1.5px solid #16a34a !important;
+    color: #86efac !important;
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    text-align: right;
+  }
+
+  .btn-save-order {
+    background: linear-gradient(135deg, #06d6a0, #0cb87a);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 14px;
+    font-size: 16px;
+    font-weight: 700;
+    width: 100%;
+    letter-spacing: 0.5px;
+    transition: all 0.2s;
+    box-shadow: 0 4px 15px rgba(6,214,160,0.35);
+    margin-top: auto;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-save-order:hover {
+    background: linear-gradient(135deg, #0cb87a, #06d6a0);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(6,214,160,0.45);
+    color: #fff;
+  }
+  .btn-save-order:active { transform: translateY(0); }
+
+  .divider-line { border: none; border-top: 1px solid #2a2a4a; margin: 10px 0; }
+
+  .two-col { display: flex; gap: 8px; }
+  .two-col > div { flex: 1; }
+  .two-col-label { font-size: 10px; color: #a0a0c0; margin-bottom: 3px; }
+
+  @media (max-width: 991px) {
+    .pos-left-panel, .pos-right-panel { height: auto; margin-bottom: 15px; }
+  }
+</style>
 
 <!-- Content Wrapper -->
 <div class="content-wrapper" style="background:#f0f2f5;">
+  <div class="content" style="padding: 15px 15px 0 15px;">
+    <div class="container-fluid" style="padding:0;">
 
-  <!-- Header -->
-  <div class="content-header">
-    <div class="container-fluid">
-      <div class="row align-items-center">
-        <div class="col-sm-6">
-          <h1 class="m-0">
-            <i class="fas fa-cash-register text-primary"></i>
-            Point of Sale
-          </h1>
+      <form action="" method="post">
+      <div class="row" style="margin:0;">
+
+        <!-- ===== LEFT PANEL: Product Cart ===== -->
+        <div class="col-lg-8 col-md-7" style="padding: 0 8px 0 0;">
+          <div class="pos-left-panel">
+
+            <div class="pos-panel-title">
+              <i class="fas fa-shopping-cart"></i>
+              Point of Sale
+              <span style="font-size:12px; font-weight:400; color:#888; margin-left:auto;">
+                <i class="fas fa-calendar-alt" style="margin-right:4px;"></i><?php echo date('F d, Y'); ?>
+              </span>
+            </div>
+
+            <!-- Barcode & Search Row -->
+            <div class="pos-search-row">
+              <div class="input-group" style="max-width:260px; flex-shrink:0;">
+                <div class="input-group-prepend">
+                  <span class="input-group-text">
+                    <i class="fas fa-barcode"></i>
+                  </span>
+                </div>
+                <input type="text" class="form-control" placeholder="Scan Barcode..." name="txtbarcode" id="txtbarcode_id">
+              </div>
+              <div style="flex:1;">
+                <select class="form-control select2" data-dropdown-css-class="select2-purple" style="width:100%;">
+                  <option>Search Product...<?php echo fill_product($pdo); ?></option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Products Table -->
+            <div class="pos-table-wrap">
+              <table id="producttable" class="table">
+                <thead>
+                  <tr>
+                    <th><i class="fas fa-box" style="margin-right:5px;"></i>Product</th>
+                    <th>Unit</th>
+                    <th><i class="fas fa-cubes" style="margin-right:4px;"></i>Stock</th>
+                    <th><i class="fas fa-tag" style="margin-right:4px;"></i>Price</th>
+                    <th style="text-align:center;">QTY</th>
+                    <th><i class="fas fa-receipt" style="margin-right:4px;"></i>Total</th>
+                    <th style="text-align:center;"><i class="fas fa-trash-alt"></i></th>
+                  </tr>
+                </thead>
+                <tbody class="details" id="itemtable">
+                  <tr data-widget="expandable-table" aria-expanded="false"></tr>
+                </tbody>
+              </table>
+            </div>
+
+          </div>
         </div>
-        <div class="col-sm-6">
-          <ol class="breadcrumb float-sm-right">
-            <li class="breadcrumb-item"><a href="userdashboard.php">Dashboard</a></li>
-            <li class="breadcrumb-item active">POS</li>
-          </ol>
+        <!-- /.LEFT PANEL -->
+
+        <!-- ===== RIGHT PANEL: Order Summary ===== -->
+        <div class="col-lg-4 col-md-5" style="padding: 0 0 0 8px;">
+          <div class="pos-right-panel">
+
+            <div class="pos-summary-title">
+              <i class="fas fa-file-invoice-dollar"></i>
+              Order Summary
+            </div>
+
+            <!-- Subtotal -->
+            <div class="summary-block">
+              <span class="summary-label"><i class="fas fa-calculator" style="margin-right:5px; color:#4cc9f0;"></i>Subtotal</span>
+              <input type="text" class="summary-input" name="txtsubtotal" id="txtsubtotal_id" readonly placeholder="0.00">
+            </div>
+
+            <!-- Discount -->
+            <div class="summary-block">
+              <span class="summary-label"><i class="fas fa-percent" style="margin-right:5px; color:#f72585;"></i>Discount</span>
+              <div class="two-col" style="margin-top:4px;">
+                <div>
+                  <div class="two-col-label">RATE (%)</div>
+                  <input type="text" class="summary-input" name="txtdiscount" id="txtdiscount_p"
+                    value="<?php echo isset($row->discount) ? $row->discount : 0; ?>">
+                </div>
+                <div>
+                  <div class="two-col-label">AMOUNT (₱)</div>
+                  <input type="text" class="summary-input" id="txtdiscount_n" readonly placeholder="0.00">
+                </div>
+              </div>
+            </div>
+
+            <!-- VAT -->
+            <div class="summary-block">
+              <span class="summary-label"><i class="fas fa-file-alt" style="margin-right:5px; color:#7209b7;"></i>VAT</span>
+              <?php
+                $defaultVat = isset($row->tax) ? (float)$row->tax : 0;
+                $presetVats = [0, 10, 20, 30, 40, 50];
+              ?>
+              <div class="two-col" style="margin-top:4px;">
+                <div>
+                  <div class="two-col-label">RATE (%)</div>
+                  <select class="summary-select" id="txtvat_p" name="txtvat_p">
+                    <?php if(!in_array($defaultVat, $presetVats, true)): ?>
+                      <option value="<?php echo $defaultVat; ?>" selected><?php echo $defaultVat; ?>%</option>
+                    <?php endif; ?>
+                    <?php foreach($presetVats as $v): ?>
+                      <option value="<?php echo $v; ?>" <?php echo ($v == $defaultVat) ? 'selected' : ''; ?>><?php echo $v; ?>%</option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+                <div>
+                  <div class="two-col-label">AMOUNT (₱)</div>
+                  <input type="text" class="summary-input" id="txtvat_n" name="txtvat" readonly placeholder="0.00">
+                </div>
+              </div>
+            </div>
+
+            <!-- TOTAL -->
+            <div class="total-block">
+              <div class="total-label">TOTAL AMOUNT</div>
+              <div class="total-value">₱ <span id="txttotal_display">0.00</span></div>
+              <input type="hidden" name="txttotal" id="txttotal">
+            </div>
+
+            <hr class="divider-line">
+
+            <!-- Payment Type -->
+            <div class="payment-type-btn">
+              <i class="fas fa-money-bill-wave"></i> CASH PAYMENT
+              <input type="hidden" name="rb" value="Cash">
+            </div>
+
+            <!-- Paid -->
+            <div class="paid-block">
+              <span class="summary-label"><i class="fas fa-hand-holding-usd" style="margin-right:5px;"></i>Amount Paid (₱)</span>
+              <input type="text" class="summary-input paid-input" name="txtpaid" id="txtpaid" placeholder="Enter amount...">
+            </div>
+
+            <!-- Change -->
+            <div class="change-block">
+              <span class="summary-label"><i class="fas fa-coins" style="margin-right:5px;"></i>Change (₱)</span>
+              <input type="text" class="summary-input change-input" name="txtdue" id="txtdue" readonly placeholder="0.00">
+            </div>
+
+            <!-- Save Button -->
+            <button type="submit" class="btn-save-order" name="btnsaveorder" id="btnsaveorder">
+              <i class="fas fa-check-circle" style="font-size:18px;"></i>
+              SAVE ORDER
+            </button>
+
+          </div>
         </div>
+        <!-- /.RIGHT PANEL -->
+
       </div>
+      </form>
+
     </div>
   </div>
-
-  <!-- Main content -->
-  <section class="content pb-3">
-    <div class="container-fluid">
-      <form action="userpos.php" method="POST" id="posForm">
-
-        <div class="row">
-
-          <!-- ============ LEFT: PRODUCT SEARCH + CART ============ -->
-          <div class="col-lg-8 col-12">
-
-            <!-- Search bar -->
-            <div class="card mb-3" style="border-radius:12px; border:none; box-shadow:0 2px 12px rgba(0,0,0,0.08);">
-              <div class="card-body py-3">
-                <div class="row align-items-center">
-                  <div class="col-md-6 mb-2 mb-md-0">
-                    <div class="input-group">
-                      <div class="input-group-prepend">
-                        <span class="input-group-text bg-primary text-white border-0">
-                          <i class="fas fa-search"></i>
-                        </span>
-                      </div>
-                      <select class="form-control select2-product" id="productSelect" style="width:100%;">
-                        <option value="">-- Search product by name --</option>
-                        <?php
-                          $sel = $pdo->prepare("SELECT * FROM tbl_product WHERE stock > 0 ORDER BY product ASC");
-                          $sel->execute();
-                          while($p = $sel->fetch(PDO::FETCH_OBJ)){
-                            echo '<option value="'.$p->pid.'">'
-                                 .htmlspecialchars($p->product)
-                                 .' &nbsp;[Stock: '.$p->stock.'] &nbsp;₱'.number_format($p->saleprice,2)
-                                 .'</option>';
-                          }
-                        ?>
-                      </select>
-                    </div>
-                  </div>
-                  <div class="col-md-6">
-                    <div class="input-group">
-                      <div class="input-group-prepend">
-                        <span class="input-group-text bg-dark text-white border-0">
-                          <i class="fas fa-barcode"></i>
-                        </span>
-                      </div>
-                      <input type="text" class="form-control" id="txtbarcode_id"
-                             placeholder="Scan barcode or type barcode #"
-                             autocomplete="off">
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Cart Table -->
-            <div class="card" style="border-radius:12px; border:none; box-shadow:0 2px 12px rgba(0,0,0,0.08);">
-              <div class="card-header d-flex align-items-center" style="border-radius:12px 12px 0 0; background:#fff; border-bottom:1px solid #f0f0f0;">
-                <h5 class="m-0 font-weight-bold"><i class="fas fa-shopping-cart text-primary mr-2"></i>Cart</h5>
-                <button type="button" class="btn btn-sm btn-outline-danger ml-auto" id="clearCartBtn">
-                  <i class="fas fa-trash-alt"></i> Clear All
-                </button>
-              </div>
-              <div class="card-body p-0">
-                <div class="table-responsive" style="max-height:420px; overflow-y:auto;">
-                  <table class="table table-hover m-0" id="producttable">
-                    <thead style="position:sticky; top:0; z-index:2;">
-                      <tr class="thead-dark">
-                        <th style="width:28%;">Product</th>
-                        <th class="text-center" style="width:9%;">Unit</th>
-                        <th class="text-center" style="width:9%;">Stock</th>
-                        <th class="text-right" style="width:12%;">Price</th>
-                        <th class="text-center" style="width:14%;">Qty</th>
-                        <th class="text-right" style="width:13%;">Total</th>
-                        <th class="text-center" style="width:7%;">Del</th>
-                      </tr>
-                    </thead>
-                    <tbody id="itemtable" class="details">
-                      <tr id="emptyrow">
-                        <td colspan="7" class="text-center text-muted py-5">
-                          <i class="fas fa-cart-plus fa-3x mb-3 d-block" style="opacity:0.3;"></i>
-                          <span style="font-size:0.95rem;">No items added yet.<br>Search or scan a product to begin.</span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <!-- Cart footer: item count -->
-              <div class="card-footer py-2 d-flex align-items-center" style="background:#f8f9fa; border-radius:0 0 12px 12px;">
-                <small class="text-muted"><i class="fas fa-info-circle mr-1"></i>
-                  <span id="itemCountLabel">0 item(s) in cart</span>
-                </small>
-              </div>
-            </div>
-
-          </div>
-          <!-- /.LEFT -->
-
-          <!-- ============ RIGHT: TOTALS + PAYMENT ============ -->
-          <div class="col-lg-4 col-12 mt-3 mt-lg-0">
-            <div class="card" style="border-radius:12px; border:none; box-shadow:0 2px 12px rgba(0,0,0,0.08);">
-              <div class="card-header" style="background:linear-gradient(135deg,#1a73e8,#0d47a1); border-radius:12px 12px 0 0;">
-                <h5 class="m-0 text-white"><i class="fas fa-calculator mr-2"></i>Order Summary</h5>
-              </div>
-              <div class="card-body">
-
-                <!-- Subtotal -->
-                <div class="summary-row">
-                  <span class="summary-label">Subtotal</span>
-                  <div class="input-group input-group-sm summary-input">
-                    <input type="text" class="form-control text-right font-weight-bold"
-                           name="txtsubtotal" id="txtsubtotal_id" readonly value="0.00">
-                    <div class="input-group-append"><span class="input-group-text">₱</span></div>
-                  </div>
-                </div>
-
-                <!-- Discount % -->
-                <div class="summary-row">
-                  <span class="summary-label">Discount <small class="text-muted">(%)</small></span>
-                  <div class="input-group input-group-sm summary-input">
-                    <input type="text" class="form-control text-right"
-                           name="txtdiscount" id="txtdiscount_p"
-                           value="<?php echo $default_discount; ?>">
-                    <div class="input-group-append"><span class="input-group-text">%</span></div>
-                  </div>
-                </div>
-
-                <!-- Discount Amount -->
-                <div class="summary-row">
-                  <span class="summary-label text-danger">Discount <small class="text-muted">(₱)</small></span>
-                  <div class="input-group input-group-sm summary-input">
-                    <input type="text" class="form-control text-right text-danger"
-                           id="txtdiscount_n" readonly value="0.00">
-                    <div class="input-group-append"><span class="input-group-text">₱</span></div>
-                  </div>
-                </div>
-
-                <!-- VAT % -->
-                <div class="summary-row">
-                  <span class="summary-label">VAT <small class="text-muted">(%)</small></span>
-                  <div class="input-group input-group-sm summary-input">
-                    <?php
-                      $presetVats = [0, 5, 10, 12, 20];
-                    ?>
-                    <select class="form-control" id="txtvat_p" name="txtvat_p">
-                      <?php if(!in_array($default_vat, $presetVats)): ?>
-                        <option value="<?php echo $default_vat; ?>" selected><?php echo $default_vat; ?>%</option>
-                      <?php endif; ?>
-                      <?php foreach($presetVats as $v): ?>
-                        <option value="<?php echo $v; ?>" <?php echo ($v == $default_vat) ? 'selected' : ''; ?>>
-                          <?php echo $v; ?>%
-                        </option>
-                      <?php endforeach; ?>
-                    </select>
-                    <div class="input-group-append"><span class="input-group-text">%</span></div>
-                  </div>
-                </div>
-
-                <!-- VAT Amount -->
-                <div class="summary-row">
-                  <span class="summary-label">VAT <small class="text-muted">(₱)</small></span>
-                  <div class="input-group input-group-sm summary-input">
-                    <input type="text" class="form-control text-right"
-                           name="txtvat" id="txtvat_n" readonly value="0.00">
-                    <div class="input-group-append"><span class="input-group-text">₱</span></div>
-                  </div>
-                </div>
-
-                <hr class="my-2">
-
-                <!-- TOTAL -->
-                <div class="total-display">
-                  <span>TOTAL AMOUNT</span>
-                  <span id="totalDisplay">₱0.00</span>
-                  <input type="hidden" name="txttotal" id="txttotal" value="0.00">
-                </div>
-
-                <hr class="my-2">
-
-                <!-- Payment Type -->
-                <div class="d-flex align-items-center mb-2">
-                  <i class="fas fa-money-bill-wave text-success mr-2"></i>
-                  <span class="font-weight-bold text-success">CASH PAYMENT</span>
-                </div>
-
-                <!-- Amount Paid -->
-                <div class="summary-row">
-                  <span class="summary-label font-weight-bold">Amount Paid</span>
-                  <div class="input-group input-group-sm summary-input">
-                    <div class="input-group-prepend"><span class="input-group-text bg-success text-white">₱</span></div>
-                    <input type="number" class="form-control text-right font-weight-bold"
-                           name="txtpaid" id="txtpaid"
-                           placeholder="0.00" min="0" step="0.01">
-                  </div>
-                </div>
-
-                <!-- Change -->
-                <div class="summary-row">
-                  <span class="summary-label text-info font-weight-bold">Change</span>
-                  <div class="input-group input-group-sm summary-input">
-                    <div class="input-group-prepend"><span class="input-group-text bg-info text-white">₱</span></div>
-                    <input type="text" class="form-control text-right font-weight-bold text-info"
-                           name="txtdue" id="txtdue" readonly value="0.00">
-                  </div>
-                </div>
-
-                <!-- Quick Cash Buttons -->
-                <div class="mt-2 mb-3">
-                  <small class="text-muted d-block mb-1"><i class="fas fa-bolt mr-1"></i>Quick Amount</small>
-                  <div class="d-flex flex-wrap" id="quickCash">
-                    <button type="button" class="btn btn-sm btn-outline-secondary quick-btn mr-1 mb-1" data-val="20">₱20</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary quick-btn mr-1 mb-1" data-val="50">₱50</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary quick-btn mr-1 mb-1" data-val="100">₱100</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary quick-btn mr-1 mb-1" data-val="200">₱200</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary quick-btn mr-1 mb-1" data-val="500">₱500</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary quick-btn mr-1 mb-1" data-val="1000">₱1K</button>
-                    <button type="button" class="btn btn-sm btn-success quick-btn mr-1 mb-1" id="exactBtn">Exact</button>
-                  </div>
-                </div>
-
-                <!-- Save Order Button -->
-                <button type="submit" class="btn btn-primary btn-block btn-lg font-weight-bold"
-                        name="btnsaveorder" id="btnsaveorder"
-                        style="border-radius:10px; letter-spacing:0.5px;">
-                  <i class="fas fa-check-circle mr-2"></i> PROCESS SALE
-                </button>
-
-              </div>
-            </div>
-          </div>
-          <!-- /.RIGHT -->
-
-        </div>
-      </form>
-    </div>
-  </section>
 </div>
 <!-- /.content-wrapper -->
 
-<?php include_once "footer.php"; ?>
 
-<!-- ========== SUCCESS / RECEIPT MODAL ========== -->
-<div class="modal fade" id="receiptModal" tabindex="-1" role="dialog">
-  <div class="modal-dialog modal-md" role="document">
-    <div class="modal-content" style="border-radius:12px; overflow:hidden;">
-      <div class="modal-header" style="background:linear-gradient(135deg,#28a745,#145a24);">
-        <h5 class="modal-title text-white"><i class="fas fa-check-circle mr-2"></i>Sale Successful!</h5>
-        <button type="button" class="close text-white" data-dismiss="modal">&times;</button>
-      </div>
-      <div class="modal-body text-center py-4">
-        <i class="fas fa-receipt fa-4x text-success mb-3"></i>
-        <h4 class="font-weight-bold">Transaction Complete</h4>
-        <p class="text-muted mb-4">Sale has been recorded and inventory updated.</p>
-        <div id="receiptSummaryBox" class="text-left bg-light rounded p-3 mb-3" style="font-size:0.9rem;"></div>
-      </div>
-      <div class="modal-footer justify-content-center">
-        <a href="#" id="printReceiptBtn" class="btn btn-primary btn-lg" target="_blank">
-          <i class="fas fa-print mr-2"></i> Print Receipt
-        </a>
-        <a href="userpos.php" class="btn btn-success btn-lg">
-          <i class="fas fa-plus-circle mr-2"></i> New Sale
-        </a>
-      </div>
-    </div>
-  </div>
-</div>
+<?php
 
-<style>
-/* ===== LAYOUT ===== */
-.content-wrapper { background: #f0f2f5; }
+include_once("footer.php");
 
-/* ===== SUMMARY ROWS ===== */
-.summary-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-.summary-label {
-  font-size: 0.82rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: #555;
-  min-width: 100px;
-}
-.summary-input {
-  max-width: 160px;
-}
-
-/* ===== TOTAL DISPLAY ===== */
-.total-display {
-  background: linear-gradient(135deg,#1a73e8,#0d47a1);
-  color: #fff;
-  border-radius: 10px;
-  padding: 14px 18px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 800;
-  font-size: 1rem;
-  margin-bottom: 8px;
-}
-.total-display span:last-child {
-  font-size: 1.5rem;
-}
-
-/* ===== CART TABLE ===== */
-#producttable thead th {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  padding: 10px 10px;
-  white-space: nowrap;
-}
-#producttable tbody td {
-  vertical-align: middle;
-  font-size: 0.88rem;
-  padding: 8px 10px;
-}
-.qty-input {
-  width: 65px !important;
-  text-align: center;
-  font-weight: 700;
-  border-radius: 6px;
-}
-
-/* ===== CARD ===== */
-.card { border-radius: 12px !important; }
-.card-header { padding: 14px 18px; }
-
-/* ===== QUICK BUTTONS ===== */
-.quick-btn { font-size: 0.78rem; padding: 3px 8px; border-radius: 6px; }
-
-/* ===== SELECT2 override ===== */
-.select2-container .select2-selection--single {
-  height: 38px !important;
-  border-radius: 0 6px 6px 0 !important;
-}
-.select2-container .select2-selection--single .select2-selection__rendered {
-  line-height: 38px !important;
-}
-.select2-container .select2-selection--single .select2-selection__arrow {
-  height: 36px !important;
-}
-
-/* ===== BADGE STYLES ===== */
-.badge-stock { font-size: 0.78rem; }
-</style>
+?>
 
 <script>
-$(document).ready(function(){
+  //Initialize Select2 Elements
+  $('.select2').select2()
 
-  // ===== SELECT2 INIT =====
-  $('.select2-product').select2({
-    placeholder: '-- Search product by name --',
-    allowClear: true,
-    width: '100%'
+  //Initialize Select2 Elements
+  $('.select2bs4').select2({
+    theme: 'bootstrap4'
+  })
+
+  var productarr = [];
+  $(function() {
+
+    $('#txtbarcode_id').on('change', function() {
+      var barcode = $("#txtbarcode_id").val();
+
+      $.ajax({
+        url: "getproduct.php",
+        method: "get",
+        datatype: "json",
+        data: {
+          id: barcode
+        },
+        success: function(data) {
+
+
+
+          if (jQuery.inArray(data["pid"], productarr) !== -1) {
+
+            var actualqty = parseInt($('#qty_id' + data["pid"]).val()) + 1;
+            $('#qty_id' + data["pid"]).val(actualqty);
+
+            var saleprice = parseInt(actualqty) * data["saleprice"];
+
+            $('#saleprice_id' + data["pid"]).html(saleprice);
+            $('#saleprice_idd' + data["pid"]).val(saleprice);
+
+            // $("#txtbarcode_id").val("");
+
+            calculate(0, 0);
+
+
+
+          } else {
+
+            addrow(data["pid"], data["product"], data["saleprice"], data["stock"], data["barcode"], data["product_unit"]);
+
+            productarr.push(data["pid"]);
+
+            // $("#txtbarcode_id").val("");
+
+            function addrow(pid, product, saleprice, stock, barcode, product_unit) {
+
+              var unit = product_unit ? product_unit : 'pcs';
+
+              var tr = '<tr>' +
+
+              '<input type="hidden" class="form-control barcode" name="barcode_arr[]" id="barcode_id' + barcode + '" value="' +barcode+ '"></td>' +
+
+                '<td style="text-align:left; vertical-align:middle; font-size:17px;"><class="form-control product_c" name="product_arr[]"  <span class="badge badge-dark">' + product + '</span><input type="hidden" class="form-control pid" name="pid_arr[]" value="' + pid + '"><input type="hidden" class="form-control product" name="product_arr[]" value="' + product + '"> </td>' +
+
+                '<td style="text-align:center;vertical-align:middle; font-size:14px;"><span class="badge badge-secondary">' + unit + '</span></td>' +
+
+                '<td style="text-align:left;vertical-align:middle; font-size:17px;"><span class="badge badge-primary stocklbl" name="stock_arr[]" id="stock_id' + pid + '">' + stock + '<span><input type="hidden" class="form-control stock_C" name="stock_c_arr[]" id="stock_idd' + pid + '" value="' + stock + '"></td>' +
+
+                '<td style="text-align:left;vertical-align:middle; font-size:17px;"><span class="badge badge-warning price" name="price_arr[]" id="price_id' + pid + '">' + saleprice + '<span><input type="hidden" class="form-control price_C" name="price_c_arr[]" id="price_idd' + pid + '" value="' + saleprice + '"></td>' +
+
+                '<td><input type="text" class="form-control qty" name="quantity_arr[]" id="qty_id' + pid + '" value="' + 1 + '" size="1"></td>' +
+
+                '<td style="text-align:left; vertical-align:middle; font-size:17px;"><span class="badge badge-success totalamt" name=netamt_arr[]" id="saleprice_id' + pid + '">' + saleprice + '</span><input type="hidden" class="form-control saleprice" name="saleprice_arr[]" id="saleprice_idd' + pid + '" value="' + saleprice + '"></td>' +
+
+                '<td><center><button type="button" name="remove" class="btn btn-danger btn-sm btnremove" data-id="' + pid + '"><span class="fas fa-trash"></span></center></td>' +
+
+
+                '</tr>';
+
+              $('.details').append(tr);
+              calculate(0, 0);
+
+
+
+            }
+$("#txtbarcode_id").val("");
+
+
+          }
+
+
+
+
+        }
+      })
+
+    })
   });
 
-  var productArr = [];
 
-  // ===== ADD ROW TO CART =====
-  function addRow(pid, product, saleprice, stock, barcode, unit){
-    unit = unit ? unit : 'pcs';
+  //search product 
 
-    // If already in cart, increment qty
-    if($.inArray(String(pid), productArr) !== -1){
-      var curQty  = parseInt($('#qty_id' + pid).val()) + 1;
-      var curStock = parseInt($('#stock_idd' + pid).val());
-      if(curQty > curStock){
-        Swal.fire({icon:'warning', title:'Stock Limit!',
-          text: 'Only ' + curStock + ' unit(s) available for this product.',
-          confirmButtonColor:'#f39c12'});
-        return;
-      }
-      $('#qty_id' + pid).val(curQty);
-      var newTotal = curQty * parseFloat($('#price_idd' + pid).val());
-      $('#saleprice_id'  + pid).text(newTotal.toFixed(2));
-      $('#saleprice_idd' + pid).val(newTotal.toFixed(2));
-      calculate();
-      return;
-    }
 
-    // New row
-    productArr.push(String(pid));
-    $('#emptyrow').hide();
+  var productarr = [];
+  $(function() {
 
-    var stockBadge = stock <= 5
-      ? '<span class="badge badge-danger badge-stock">' + stock + '</span>'
-      : (stock <= 10
-          ? '<span class="badge badge-warning badge-stock">' + stock + '</span>'
-          : '<span class="badge badge-success badge-stock">' + stock + '</span>');
+    $('.select2').on('change', function() {
+      var productid = $(".select2").val();
 
-    var tr = '<tr id="row_' + pid + '">'
-      + '<input type="hidden" name="barcode_arr[]"  id="barcode_id'  + pid + '" value="' + barcode   + '">'
-      + '<input type="hidden" name="pid_arr[]"      class="pid"      value="' + pid       + '">'
-      + '<input type="hidden" name="product_arr[]"  class="product"  value="' + product   + '">'
-      + '<input type="hidden" name="stock_c_arr[]"  class="stock_C"  id="stock_idd'  + pid + '" value="' + stock + '">'
-      + '<input type="hidden" name="price_c_arr[]"  class="price_C"  id="price_idd'  + pid + '" value="' + saleprice + '">'
-      + '<input type="hidden" name="saleprice_arr[]" class="saleprice" id="saleprice_idd' + pid + '" value="' + saleprice + '">'
+      $.ajax({
+        url: "getproduct.php",
+        method: "get",
+        datatype: "json",
+        data: {
+          id: productid
+        },
+        success: function(data) {
 
-      + '<td>'
-      +   '<span class="font-weight-bold">' + product + '</span>'
-      + '</td>'
 
-      + '<td class="text-center">'
-      +   '<span class="badge badge-secondary">' + unit + '</span>'
-      + '</td>'
 
-      + '<td class="text-center" id="stock_cell_' + pid + '">' + stockBadge + '</td>'
+          if (jQuery.inArray(data["pid"], productarr) !== -1) {
 
-      + '<td class="text-right">'
-      +   '<span class="text-warning font-weight-bold">₱' + parseFloat(saleprice).toFixed(2) + '</span>'
-      + '</td>'
+            var actualqty = parseInt($('#qty_id' + data["pid"]).val()) + 1;
+            $('#qty_id' + data["pid"]).val(actualqty);
 
-      + '<td class="text-center">'
-      +   '<div class="input-group input-group-sm justify-content-center">'
-      +     '<div class="input-group-prepend">'
-      +       '<button type="button" class="btn btn-sm btn-outline-secondary qty-minus" data-pid="' + pid + '">-</button>'
-      +     '</div>'
-      +     '<input type="number" class="form-control qty-input qty" name="quantity_arr[]"'
-      +       ' id="qty_id' + pid + '" value="1" min="1" max="' + stock + '">'
-      +     '<div class="input-group-append">'
-      +       '<button type="button" class="btn btn-sm btn-outline-secondary qty-plus" data-pid="' + pid + '">+</button>'
-      +     '</div>'
-      +   '</div>'
-      + '</td>'
+            var saleprice = parseInt(actualqty) * data["saleprice"];
 
-      + '<td class="text-right">'
-      +   '<span class="text-success font-weight-bold" id="saleprice_id' + pid + '">' + parseFloat(saleprice).toFixed(2) + '</span>'
-      + '</td>'
+            $('#saleprice_id' + data["pid"]).html(saleprice);
+            $('#saleprice_idd' + data["pid"]).val(saleprice);
 
-      + '<td class="text-center">'
-      +   '<button type="button" class="btn btn-danger btn-sm btnremove" data-id="' + pid + '">'
-      +     '<i class="fas fa-trash"></i>'
-      +   '</button>'
-      + '</td>'
+            // $("#txtbarcode_id").val("");
 
-      + '</tr>';
+            calculate(0, 0);
+          } else {
 
-    $('#itemtable').append(tr);
-    calculate();
-    updateItemCount();
-  }
 
-  // ===== PRODUCT SELECT =====
-  $('#productSelect').on('change', function(){
-    var pid = $(this).val();
-    if(!pid) return;
-    $.getJSON('getproduct.php', {id: pid}, function(data){
-      if(data && data.pid){
-        addRow(data.pid, data.product, data.saleprice, data.stock, data.barcode, data.product_unit);
-      }
-    });
-    $(this).val('').trigger('change');
+            addrow(data["pid"], data["product"], data["saleprice"], data["stock"], data["barcode"], data["product_unit"]);
+
+            productarr.push(data["pid"]);
+
+            // $("#txtbarcode_id").val("");
+
+            function addrow(pid, product, saleprice, stock, barcode, product_unit) {
+
+              var unit = product_unit ? product_unit : 'pcs';
+
+              var tr = '<tr>' +
+
+              '<input type="hidden" class="form-control barcode" name="barcode_arr[]" id="barcode_id' + barcode + '" value="' +barcode+ '">' +
+
+                '<td style="text-align:left; vertical-align:middle; font-size:17px;"><class="form-control product_c" name="product_arr[]" <span class="badge badge-dark">' + product + '</span><input type="hidden" class="form-control pid" name="pid_arr[]" value="' + pid + '"><input type="hidden" class="form-control product" name="product_arr[]" value="' + product + '"> </td>' +
+
+                '<td style="text-align:center;vertical-align:middle; font-size:14px;"><span class="badge badge-secondary">' + unit + '</span></td>' +
+
+                '<td style="text-align:left;vertical-align:middle; font-size:17px;"><span class="badge badge-primary stocklbl" name="stock_arr[]" id="stock_id' + pid + '">' + stock + '<span><input type="hidden" class="form-control stock_C" name="stock_c_arr[]" id="stock_idd' + pid + '" value="' + stock + '"></td>' +
+
+                '<td style="text-align:left;vertical-align:middle; font-size:17px;"><span class="badge badge-warning price" name="price_arr[]" id="price_id' + pid + '">' + saleprice + '<span><input type="hidden" class="form-control price_C" name="price_c_arr[]" id="price_idd' + pid + '" value="' + saleprice + '"></td>' +
+
+                '<td><input type="text" class="form-control qty" name="quantity_arr[]" id="qty_id' + pid + '" value="' + 1 + '" size="1"></td>' +
+
+                '<td style="text-align:left; vertical-align:middle; font-size:17px;"><span class="badge badge-success totalamt" name=netamt_arr[]" id="saleprice_id' + pid + '">' + saleprice + '</span><input type="hidden" class="form-control saleprice" name="saleprice_arr[]" id="saleprice_idd' + pid + '" value="' + saleprice + '"></td>' +
+
+                '<td><center><button type="button" name="remove" class="btn btn-danger btn-sm btnremove" data-id="' + pid + '"><span class="fas fa-trash"></span></center></td>' +
+
+
+                '</tr>';
+
+              $('.details').append(tr);
+
+              calculate(0, 0);
+
+            }
+
+            $("#txtbarcode_id").val("");
+
+          }
+
+
+
+
+        }
+      })
+
+    })
   });
 
-  // ===== BARCODE SCAN =====
-  $('#txtbarcode_id').on('change', function(){
-    var code = $(this).val().trim();
-    if(!code) return;
-    $.getJSON('getproduct.php', {id: code}, function(data){
-      if(data && data.pid){
-        addRow(data.pid, data.product, data.saleprice, data.stock, data.barcode, data.product_unit);
-      } else {
-        Swal.fire({icon:'error', title:'Not Found!',
-          text:'No product found for barcode: ' + code,
-          confirmButtonColor:'#d33'});
-      }
-    });
-    $(this).val('');
-  });
 
-  // ===== QTY MINUS =====
-  $(document).on('click', '.qty-minus', function(){
-    var pid = $(this).data('pid');
-    var input = $('#qty_id' + pid);
-    var cur = parseInt(input.val());
-    if(cur > 1){
-      input.val(cur - 1).trigger('change');
-    }
-  });
+  $("#itemtable").delegate(".qty", "keyup change", function() {
 
-  // ===== QTY PLUS =====
-  $(document).on('click', '.qty-plus', function(){
-    var pid = $(this).data('pid');
-    var input  = $('#qty_id' + pid);
-    var stock  = parseInt($('#stock_idd' + pid).val());
-    var cur    = parseInt(input.val());
-    if(cur < stock){
-      input.val(cur + 1).trigger('change');
+    var quantity = $(this);
+    var tr = $(this).parent().parent();
+
+    if ((quantity.val() - 0) > (tr.find(".stock_C").val() - 0)) {
+
+      Swal.fire("WARNING!", "SORRY! this much of quantity is NOT Available", "warning");
+
+      quantity.val(1);
+
+      tr.find(".totalamt").text(quantity.val() * tr.find(".price").text());
+
+      tr.find(".saleprice").val(quantity.val() * tr.find(".price").text());
+      calculate(0, 0);
+
     } else {
-      Swal.fire({icon:'warning', title:'Stock Limit!',
-        text:'Only ' + stock + ' unit(s) available.',
-        confirmButtonColor:'#f39c12'});
+
+      tr.find(".totalamt").text(quantity.val() * tr.find(".price").text());
+
+      tr.find(".saleprice").val(quantity.val() * tr.find(".price").text());
+      calculate(0, 0);
     }
+
   });
 
-  // ===== QTY MANUAL INPUT =====
-  $(document).on('change keyup', '.qty', function(){
-    var tr    = $(this).closest('tr');
-    var qty   = parseInt($(this).val()) || 1;
-    var pid   = tr.find('.pid').val();
-    var stock = parseInt($('#stock_idd' + pid).val());
-    var price = parseFloat($('#price_idd' + pid).val());
 
-    if(qty < 1)  qty = 1;
-    if(qty > stock){
-      Swal.fire({icon:'warning', title:'Exceeds Stock!',
-        text:'Only ' + stock + ' unit(s) available.',
-        confirmButtonColor:'#f39c12'});
-      qty = stock;
-    }
-    $(this).val(qty);
+  function calculate(dis, paid) {
 
-    var lineTotal = qty * price;
-    $('#saleprice_id'  + pid).text(lineTotal.toFixed(2));
-    $('#saleprice_idd' + pid).val(lineTotal.toFixed(2));
-    calculate();
-  });
-
-  // ===== REMOVE ROW =====
-  $(document).on('click', '.btnremove', function(){
-    var pid = $(this).data('id');
-    productArr = $.grep(productArr, function(v){ return v != String(pid); });
-    $('#row_' + pid).remove();
-    if(productArr.length === 0) $('#emptyrow').show();
-    calculate();
-    updateItemCount();
-  });
-
-  // ===== CLEAR ALL =====
-  $('#clearCartBtn').on('click', function(){
-    if(productArr.length === 0) return;
-    Swal.fire({
-      title: 'Clear Cart?',
-      text: 'Remove all items from cart?',
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonColor: '#d33',
-      cancelButtonColor: '#6c757d',
-      confirmButtonText: 'Yes, clear it!'
-    }).then(function(result){
-      if(result.isConfirmed){
-        productArr = [];
-        $('#itemtable tr:not(#emptyrow)').remove();
-        $('#emptyrow').show();
-        calculate();
-        updateItemCount();
-      }
-    });
-  });
-
-  // ===== DISCOUNT =====
-  $('#txtdiscount_p').on('keyup change', function(){ calculate(); });
-
-  // ===== VAT =====
-  $('#txtvat_p').on('change', function(){ calculate(); });
-
-  // ===== PAID =====
-  $('#txtpaid').on('keyup change', function(){ calculate(); });
-
-  // ===== QUICK CASH BUTTONS =====
-  $(document).on('click', '.quick-btn', function(){
-    var val = $(this).data('val');
-    $('#txtpaid').val(val).trigger('change');
-  });
-
-  $('#exactBtn').on('click', function(){
-    var total = parseFloat($('#txttotal').val()) || 0;
-    $('#txtpaid').val(total.toFixed(2)).trigger('change');
-  });
-
-  // ===== CALCULATE =====
-  function calculate(){
     var subtotal = 0;
-    $('.saleprice').each(function(){
-      subtotal += parseFloat($(this).val()) || 0;
+    var paid_amt = paid;
+
+    $(".saleprice").each(function() {
+      subtotal = subtotal + $(this).val() * 1;
     });
 
-    var discPct = parseFloat($('#txtdiscount_p').val()) || 0;
-    var discAmt = (discPct / 100) * subtotal;
-    $('#txtdiscount_n').val(discAmt.toFixed(2));
+    $("#txtsubtotal_id").val(subtotal.toFixed(2));
 
-    var afterDisc = subtotal - discAmt;
+    var discountPct = parseFloat($("#txtdiscount_p").val()) || 0;
+    var discountAmt = (discountPct / 100) * subtotal;
+    $("#txtdiscount_n").val(discountAmt.toFixed(2));
 
-    var vatPct  = parseFloat($('#txtvat_p').val()) || 0;
+    var afterDiscount = subtotal - discountAmt;
+
+    var vatPct = parseFloat($("#txtvat_p").val()) || 0;
+    // VAT is DISPLAY-ONLY (included in the amount), so subtotal/total stay the same.
+    // Extract VAT from the amount: vat = amount - amount/(1+rate)
     var vatRate = vatPct / 100;
-    var vatAmt  = vatRate > 0 ? (afterDisc - afterDisc / (1 + vatRate)) : 0;
-    $('#txtvat_n').val(vatAmt.toFixed(2));
+    var vatAmt = vatRate > 0 ? (afterDiscount - (afterDiscount / (1 + vatRate))) : 0;
+    $("#txtvat_n").val(vatAmt.toFixed(2));
 
-    var total = afterDisc;
-    var paid  = parseFloat($('#txtpaid').val()) || 0;
-    var change = paid - total;
+    var total = afterDiscount;
+    var due   = total - paid_amt;
 
-    $('#txtsubtotal_id').val(subtotal.toFixed(2));
-    $('#txttotal').val(total.toFixed(2));
-    $('#totalDisplay').text('₱' + total.toFixed(2));
-    $('#txtdue').val(change >= 0 ? change.toFixed(2) : '0.00');
+    $("#txttotal").val(total.toFixed(2));
+    // Update display span
+    $("#txttotal_display").text(total.toFixed(2));
+    $("#txtdue").val(due.toFixed(2));
 
-    // Highlight change
-    if(change >= 0 && paid > 0){
-      $('#txtdue').removeClass('text-danger').addClass('text-info');
-    } else if(paid > 0 && change < 0){
-      $('#txtdue').removeClass('text-info').addClass('text-danger');
-    }
-  }
+  } //calculate function
 
-  // ===== UPDATE ITEM COUNT =====
-  function updateItemCount(){
-    var count = productArr.length;
-    $('#itemCountLabel').text(count + ' item(s) in cart');
-  }
 
-  // ===== FORM SUBMIT VALIDATION =====
-  $('#posForm').on('submit', function(e){
-    var total = parseFloat($('#txttotal').val()) || 0;
-    var paid  = parseFloat($('#txtpaid').val())  || 0;
-
-    if(productArr.length === 0){
-      e.preventDefault();
-      Swal.fire({icon:'warning', title:'Empty Cart!',
-        text:'Please add at least one product to the cart.',
-        confirmButtonColor:'#f39c12'});
-      return false;
-    }
-
-    if(total <= 0){
-      e.preventDefault();
-      Swal.fire({icon:'warning', title:'No Amount!',
-        text:'Total amount must be greater than zero.',
-        confirmButtonColor:'#f39c12'});
-      return false;
-    }
-
-    if(paid < total){
-      e.preventDefault();
-      Swal.fire({icon:'error', title:'Insufficient Payment!',
-        text: 'Amount paid (₱' + paid.toFixed(2) + ') is less than total (₱' + total.toFixed(2) + ').',
-        confirmButtonColor:'#d33'});
-      return false;
-    }
-
-    // Show loading on button
-    $('#btnsaveorder').prop('disabled', true)
-      .html('<i class="fas fa-spinner fa-spin mr-2"></i>Processing...');
+  $("#txtdiscount_p").keyup(function() {
+    calculate($(this).val(), 0);
   });
 
-  // ===== SUCCESS MODAL (after redirect) =====
-  <?php if(isset($_GET['success']) && isset($_GET['inv'])): ?>
-    var invId = <?php echo (int)$_GET['inv']; ?>;
-    $('#printReceiptBtn').attr('href', 'printbill.php?id=' + invId);
-    $('#receiptSummaryBox').html(
-      '<strong>Invoice #:</strong> ' + String(invId).padStart(4,'0') + '<br>' +
-      '<strong>Cashier:</strong> <?php echo htmlspecialchars($_SESSION['username']); ?><br>' +
-      '<strong>Date:</strong> <?php echo date('M d, Y h:i A'); ?>'
-    );
-    $('#receiptModal').modal({backdrop:'static', keyboard:false});
-    $('#receiptModal').modal('show');
-  <?php endif; ?>
+  $("#txtvat_p").on('change', function() {
+    var paid = parseFloat($("#txtpaid").val()) || 0;
+    calculate($("#txtdiscount_p").val(), paid);
+  });
 
-});
+  $("#txtpaid").keyup(function() {
+    var paid = $(this).val();
+    var discount = $("#txtdiscount_p").val();
+    calculate(discount, paid);
+  });
+
+
+  $(document).on('click', '.btnremove', function() {
+
+    var removed = $(this).attr("data-id");
+    productarr = jQuery.grep(productarr, function(value) {
+
+      return value != removed;
+
+    });
+
+    $(this).closest('tr').remove();
+    calculate(0, 0);
+
+  });
+
+  // Validate payment before submitting
+  $('form').on('submit', function(e) {
+    var total = parseFloat($('#txttotal').val()) || 0;
+    var paid = parseFloat($('#txtpaid').val()) || 0;
+    
+    if(paid < total) {
+      e.preventDefault();
+      Swal.fire({
+        icon: 'error',
+        title: 'Insufficient Payment!',
+        text: 'Amount paid (₱' + paid.toFixed(2) + ') is less than total (₱' + total.toFixed(2) + ')',
+        confirmButtonColor: '#d33'
+      });
+      return false;
+    }
+    
+    if($('.details tr').length <= 1) {
+      e.preventDefault();
+      Swal.fire({
+        icon: 'warning',
+        title: 'No Products!',
+        text: 'Please add products to the order',
+        confirmButtonColor: '#f39c12'
+      });
+      return false;
+    }
+  });
 </script>
 
-<?php
-if(isset($_SESSION['pos_status']) && $_SESSION['pos_status'] != ''):
-?>
+<?php if(isset($_SESSION['status']) && $_SESSION['status'] != ''): ?>
 <script>
-Swal.fire({
-  icon: '<?php echo $_SESSION['pos_status_code']; ?>',
-  title: '<?php echo addslashes($_SESSION['pos_status']); ?>',
-  confirmButtonColor: '#3085d6'
-});
+  Swal.fire({
+    icon: '<?php echo $_SESSION['status_code']; ?>',
+    title: '<?php echo $_SESSION['status']; ?>',
+    showConfirmButton: true
+  });
 </script>
-<?php
-  unset($_SESSION['pos_status']);
-  unset($_SESSION['pos_status_code']);
-endif;
+<?php 
+  unset($_SESSION['status']);
+  unset($_SESSION['status_code']);
+endif; 
 ?>
-
